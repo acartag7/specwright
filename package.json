@@ -11,7 +11,9 @@
     "prepare": "husky"
   },
   "devDependencies": {
+    "@anthropic-ai/sdk": "^0.71.2",
     "husky": "^9.1.7",
+    "tsx": "^4.19.0",
     "turbo": "^2.3.3",
     "typescript": "^5.7.0"
   },

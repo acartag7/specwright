@@ -2,6 +2,72 @@
  * SQLite schema definitions for GLM Orchestrator
  */
 
+// ============================================================================
+// MVP Schema (Spec-Driven Development Platform)
+// ============================================================================
+
+export const MVP_SCHEMA = `
+-- Projects
+CREATE TABLE IF NOT EXISTS projects (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  directory TEXT NOT NULL,
+  description TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+-- Specs
+CREATE TABLE IF NOT EXISTS specs (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  content TEXT NOT NULL DEFAULT '',
+  version INTEGER DEFAULT 1,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+
+-- Chunks
+CREATE TABLE IF NOT EXISTS chunks (
+  id TEXT PRIMARY KEY,
+  spec_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL,
+  "order" INTEGER NOT NULL,
+  status TEXT DEFAULT 'pending',
+  output TEXT,
+  error TEXT,
+  started_at INTEGER,
+  completed_at INTEGER,
+  FOREIGN KEY (spec_id) REFERENCES specs(id) ON DELETE CASCADE
+);
+
+-- Tool Calls (for execution history)
+CREATE TABLE IF NOT EXISTS chunk_tool_calls (
+  id TEXT PRIMARY KEY,
+  chunk_id TEXT NOT NULL,
+  tool TEXT NOT NULL,
+  input TEXT NOT NULL,
+  output TEXT,
+  status TEXT DEFAULT 'running',
+  started_at INTEGER NOT NULL,
+  completed_at INTEGER,
+  FOREIGN KEY (chunk_id) REFERENCES chunks(id) ON DELETE CASCADE
+);
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_specs_project ON specs(project_id);
+CREATE INDEX IF NOT EXISTS idx_chunks_spec ON chunks(spec_id);
+CREATE INDEX IF NOT EXISTS idx_chunks_status ON chunks(status);
+CREATE INDEX IF NOT EXISTS idx_chunk_tool_calls_chunk ON chunk_tool_calls(chunk_id);
+`;
+
+// ============================================================================
+// Legacy Schema (v2 - kept for reference)
+// ============================================================================
+
 export const SCHEMA_V2 = `
 -- Servers table (existing)
 CREATE TABLE IF NOT EXISTS servers (

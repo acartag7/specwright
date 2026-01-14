@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "GLM Orchestrator Dashboard",
-  description: "Visualize GLM Orchestrator activity in real-time",
+  title: "Spec-Driven Dev",
+  description: "Write specs, break into chunks, execute with AI",
 };
 
 export default function RootLayout({

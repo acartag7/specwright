@@ -3,6 +3,95 @@
  */
 
 // ============================================================================
+// MVP Data Model Types
+// ============================================================================
+
+export interface Project {
+  id: string;
+  name: string;
+  directory: string;
+  description?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface Spec {
+  id: string;
+  projectId: string;
+  title: string;
+  content: string;
+  version: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface Chunk {
+  id: string;
+  specId: string;
+  title: string;
+  description: string;
+  order: number;
+  status: ChunkStatus;
+  output?: string;
+  error?: string;
+  startedAt?: number;
+  completedAt?: number;
+}
+
+export type ChunkStatus = 'pending' | 'running' | 'completed' | 'failed';
+
+export interface ChunkToolCall {
+  id: string;
+  chunkId: string;
+  tool: string;
+  input: Record<string, unknown>;
+  output?: string;
+  status: ChunkToolCallStatus;
+  startedAt: number;
+  completedAt?: number;
+}
+
+export type ChunkToolCallStatus = 'running' | 'completed' | 'error';
+
+// API Request/Response types
+export interface CreateProjectRequest {
+  name: string;
+  directory: string;
+  description?: string;
+}
+
+export interface UpdateProjectRequest {
+  name?: string;
+  directory?: string;
+  description?: string;
+}
+
+export interface CreateChunkRequest {
+  title: string;
+  description: string;
+  order?: number;
+}
+
+export interface UpdateChunkRequest {
+  title?: string;
+  description?: string;
+  order?: number;
+}
+
+export interface UpdateSpecRequest {
+  title?: string;
+  content?: string;
+}
+
+export interface RefineSpecRequest {
+  instructions?: string;
+}
+
+export interface ReorderChunksRequest {
+  chunkIds: string[];
+}
+
+// ============================================================================
 // Opencode API Types (for GLM)
 // ============================================================================
 

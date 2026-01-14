@@ -10,9 +10,9 @@ A web-based tool where you write specs with AI assistance, break them into chunk
 
 ## Current Progress
 
-**Status:** Day 1 - Not Started
+**Status:** Day 1 - Complete
 **Last Updated:** 2025-01-14
-**Next Task:** Create new database schema
+**Next Task:** Day 2 - Spec & Chunks
 
 ### Completed
 - [x] Project structure (monorepo with pnpm + turborepo)
@@ -20,9 +20,16 @@ A web-based tool where you write specs with AI assistance, break them into chunk
 - [x] AI clients (OpencodeClient for GLM, ClaudeClient for Opus)
 - [x] SSE infrastructure for real-time updates
 - [x] MVP spec written
+- [x] **Day 1: Foundation**
+  - [x] New MVP database schema (projects, specs, chunks, chunk_tool_calls)
+  - [x] Shared MVP types in @glm/shared
+  - [x] Project CRUD API routes
+  - [x] Project list UI (home page)
+  - [x] Create Project modal
+  - [x] Project workspace page placeholder
 
 ### In Progress
-- [ ] **Day 1: Foundation** ← START HERE
+- [ ] **Day 2: Spec & Chunks** ← START HERE
 
 ### Blockers / Notes
 _None_
@@ -294,11 +301,11 @@ GET    /api/events/[chunkId]      # SSE stream for specific chunk
 
 ## Implementation Plan
 
-### Day 1: Foundation
-- [ ] Create new database schema (drop old tables)
-- [ ] Create shared types in `@glm/shared`
-- [ ] Set up API routes structure
-- [ ] Project CRUD (API + basic UI)
+### Day 1: Foundation ✅
+- [x] Create new database schema (drop old tables)
+- [x] Create shared types in `@glm/shared`
+- [x] Set up API routes structure
+- [x] Project CRUD (API + basic UI)
 
 ### Day 2: Spec & Chunks
 - [ ] Spec editor component (simple textarea initially)
