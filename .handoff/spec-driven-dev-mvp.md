@@ -6,6 +6,29 @@ A web-based tool where you write specs with AI assistance, break them into chunk
 
 **Not** a Cursor/Windsurf competitor. **A personal/team tool** for structured AI-assisted development.
 
+---
+
+## Current Progress
+
+**Status:** Day 1 - Not Started
+**Last Updated:** 2025-01-14
+**Next Task:** Create new database schema
+
+### Completed
+- [x] Project structure (monorepo with pnpm + turborepo)
+- [x] Dashboard foundation (Next.js + Tailwind CSS 4)
+- [x] AI clients (OpencodeClient for GLM, ClaudeClient for Opus)
+- [x] SSE infrastructure for real-time updates
+- [x] MVP spec written
+
+### In Progress
+- [ ] **Day 1: Foundation** ← START HERE
+
+### Blockers / Notes
+_None_
+
+---
+
 ## MVP Scope
 
 ### In Scope
