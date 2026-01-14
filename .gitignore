@@ -33,3 +33,4 @@ test-*.txt
 
 # GLM temp files
 .glm-*
+test-glm.sh
