@@ -35,7 +35,7 @@ export default function SpecWorkspace() {
   const containerRef = useRef<HTMLDivElement>(null);
   const leftColumnRef = useRef<HTMLDivElement>(null);
 
-  const { state: executionState, runChunk, abortChunk } = useExecution();
+  const { state: executionState, runChunk, abortChunk, reviewChunk, clearReview } = useExecution();
 
   // Handle horizontal resize
   const handleHorizontalResize = useCallback((delta: number) => {
@@ -166,6 +166,55 @@ export default function SpecWorkspace() {
       ));
     }
   }, [executionState.chunkId, executionState.status]);
+
+  // Refresh chunks after review (to get updated review status and any new fix chunks)
+  const refreshChunks = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/specs/${specId}/chunks`);
+      if (response.ok) {
+        const updatedChunks = await response.json();
+        setChunks(updatedChunks);
+      }
+    } catch (err) {
+      console.error('Failed to refresh chunks:', err);
+    }
+  }, [specId]);
+
+  // Handle reviewing a completed chunk
+  const handleReviewChunk = useCallback(async () => {
+    if (!selectedChunk) return;
+    try {
+      await reviewChunk(selectedChunk.id);
+      await refreshChunks();
+    } catch (err) {
+      console.error('Failed to review chunk:', err);
+    }
+  }, [selectedChunk, reviewChunk, refreshChunks]);
+
+  // Handle running a fix chunk
+  const handleRunFix = useCallback(async (fixChunkId: string) => {
+    try {
+      await refreshChunks();
+      const fixChunk = chunks.find(c => c.id === fixChunkId);
+      if (fixChunk) {
+        setSelectedChunk(fixChunk);
+        await runChunk(fixChunkId);
+        await refreshChunks();
+      }
+    } catch (err) {
+      console.error('Failed to run fix chunk:', err);
+    }
+  }, [chunks, runChunk, refreshChunks]);
+
+  // Handle skipping review (clear review state)
+  const handleSkipReview = useCallback(() => {
+    clearReview();
+  }, [clearReview]);
+
+  // Handle marking a chunk as done (clear review and move on)
+  const handleMarkDone = useCallback(() => {
+    clearReview();
+  }, [clearReview]);
 
   if (isLoading) {
     return (
@@ -312,6 +361,13 @@ export default function SpecWorkspace() {
               isRunning={executionState.isRunning}
               startedAt={executionState.startedAt}
               onCancel={executionState.isRunning ? handleCancelExecution : undefined}
+              isReviewing={executionState.isReviewing}
+              reviewResult={executionState.reviewResult}
+              fixChunkId={executionState.fixChunkId}
+              onReview={handleReviewChunk}
+              onRunFix={handleRunFix}
+              onSkipReview={handleSkipReview}
+              onMarkDone={handleMarkDone}
             />
           </div>
         </div>

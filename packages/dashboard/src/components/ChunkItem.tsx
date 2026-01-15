@@ -1,6 +1,6 @@
 'use client';
 
-import type { Chunk } from '@glm/shared';
+import type { Chunk, ReviewStatus } from '@glm/shared';
 
 interface ChunkItemProps {
   chunk: Chunk;
@@ -47,6 +47,24 @@ const statusConfig = {
     color: 'text-amber-400',
     bg: 'bg-amber-900/10',
     label: 'Cancelled',
+  },
+};
+
+const reviewConfig: Record<ReviewStatus, { icon: string; color: string; label: string }> = {
+  pass: {
+    icon: '✓',
+    color: 'text-emerald-400',
+    label: 'Passed',
+  },
+  needs_fix: {
+    icon: '⚠',
+    color: 'text-amber-400',
+    label: 'Needs Fix',
+  },
+  fail: {
+    icon: '✕',
+    color: 'text-red-400',
+    label: 'Failed',
   },
 };
 
@@ -103,9 +121,21 @@ export default function ChunkItem({
 
           {/* Status info */}
           {chunk.status === 'completed' && chunk.completedAt && (
-            <p className="text-[10px] text-neutral-600 mt-1.5 font-mono">
-              completed {new Date(chunk.completedAt).toLocaleTimeString()}
-            </p>
+            <div className="flex items-center gap-2 mt-1.5">
+              <p className="text-[10px] text-neutral-600 font-mono">
+                completed {new Date(chunk.completedAt).toLocaleTimeString()}
+              </p>
+              {/* Review status indicator */}
+              {chunk.reviewStatus && (
+                <span
+                  className={`text-[10px] font-mono flex items-center gap-1 ${reviewConfig[chunk.reviewStatus].color}`}
+                  title={chunk.reviewFeedback}
+                >
+                  <span>{reviewConfig[chunk.reviewStatus].icon}</span>
+                  <span className="lowercase">{reviewConfig[chunk.reviewStatus].label}</span>
+                </span>
+              )}
+            </div>
           )}
           {chunk.status === 'failed' && chunk.error && (
             <p className="text-[10px] text-red-400 mt-1.5 font-mono truncate">

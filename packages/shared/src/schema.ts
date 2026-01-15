@@ -45,6 +45,8 @@ CREATE TABLE IF NOT EXISTS chunks (
   error TEXT,
   started_at INTEGER,
   completed_at INTEGER,
+  review_status TEXT,
+  review_feedback TEXT,
   FOREIGN KEY (spec_id) REFERENCES specs(id) ON DELETE CASCADE
 );
 
@@ -221,4 +223,13 @@ export const MIGRATIONS_PHASE2 = [
   `ALTER TABLE specs ADD COLUMN branch_name TEXT`,
   `ALTER TABLE specs ADD COLUMN pr_number INTEGER`,
   `ALTER TABLE specs ADD COLUMN pr_url TEXT`,
+];
+
+/**
+ * Migration queries for Phase 2 Review Loop
+ * These add review columns to the chunks table
+ */
+export const MIGRATIONS_REVIEW_LOOP = [
+  `ALTER TABLE chunks ADD COLUMN review_status TEXT`,
+  `ALTER TABLE chunks ADD COLUMN review_feedback TEXT`,
 ];

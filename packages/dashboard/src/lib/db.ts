@@ -2,8 +2,8 @@ import Database, { type Database as DatabaseType } from 'better-sqlite3';
 import path from 'path';
 import os from 'os';
 import { existsSync, mkdirSync } from 'fs';
-import { MVP_SCHEMA, MIGRATIONS_PHASE2 } from '@glm/shared';
-import type { Project, Spec, Chunk, ChunkToolCall, SpecStudioState, SpecStudioStep, Question, ChunkSuggestion, SpecStatus } from '@glm/shared';
+import { MVP_SCHEMA, MIGRATIONS_PHASE2, MIGRATIONS_REVIEW_LOOP } from '@glm/shared';
+import type { Project, Spec, Chunk, ChunkToolCall, SpecStudioState, SpecStudioStep, Question, ChunkSuggestion, SpecStatus, ReviewStatus } from '@glm/shared';
 
 const DB_DIR = path.join(os.homedir(), '.glm-orchestrator');
 const DB_PATH = path.join(DB_DIR, 'orchestrator.db');
@@ -28,6 +28,9 @@ function getDb(): DatabaseType {
   // Run Phase 2 migrations (add columns to specs table)
   runPhase2Migrations(db);
 
+  // Run Review Loop migrations (add review columns to chunks table)
+  runReviewLoopMigrations(db);
+
   return db;
 }
 
@@ -38,6 +41,26 @@ function runPhase2Migrations(database: DatabaseType): void {
 
   if (!hasStatusColumn) {
     for (const migration of MIGRATIONS_PHASE2) {
+      try {
+        database.exec(migration);
+      } catch (err) {
+        // Column might already exist, ignore
+        const message = err instanceof Error ? err.message : String(err);
+        if (!message.includes('duplicate column')) {
+          console.warn(`Migration warning: ${message}`);
+        }
+      }
+    }
+  }
+}
+
+function runReviewLoopMigrations(database: DatabaseType): void {
+  // Check if migration is needed by checking if 'review_status' column exists
+  const tableInfo = database.prepare(`PRAGMA table_info(chunks)`).all() as { name: string }[];
+  const hasReviewStatusColumn = tableInfo.some(col => col.name === 'review_status');
+
+  if (!hasReviewStatusColumn) {
+    for (const migration of MIGRATIONS_REVIEW_LOOP) {
       try {
         database.exec(migration);
       } catch (err) {
@@ -313,6 +336,8 @@ interface ChunkRow {
   error: string | null;
   started_at: number | null;
   completed_at: number | null;
+  review_status: string | null;
+  review_feedback: string | null;
 }
 
 function rowToChunk(row: ChunkRow): Chunk {
@@ -327,6 +352,8 @@ function rowToChunk(row: ChunkRow): Chunk {
     error: row.error ?? undefined,
     startedAt: row.started_at ?? undefined,
     completedAt: row.completed_at ?? undefined,
+    reviewStatus: (row.review_status as ReviewStatus) ?? undefined,
+    reviewFeedback: row.review_feedback ?? undefined,
   };
 }
 
@@ -374,7 +401,16 @@ export function createChunk(specId: string, data: { title: string; description: 
   };
 }
 
-export function updateChunk(id: string, data: { title?: string; description?: string; order?: number; status?: Chunk['status']; output?: string; error?: string }): Chunk | null {
+export function updateChunk(id: string, data: {
+  title?: string;
+  description?: string;
+  order?: number;
+  status?: Chunk['status'];
+  output?: string;
+  error?: string;
+  reviewStatus?: ReviewStatus;
+  reviewFeedback?: string;
+}): Chunk | null {
   const database = getDb();
   const existing = getChunk(id);
   if (!existing) return null;
@@ -383,7 +419,8 @@ export function updateChunk(id: string, data: { title?: string; description?: st
     UPDATE chunks
     SET title = ?, description = ?, "order" = ?, status = ?, output = ?, error = ?,
         started_at = CASE WHEN ? = 'running' AND started_at IS NULL THEN ? ELSE started_at END,
-        completed_at = CASE WHEN ? IN ('completed', 'failed') THEN ? ELSE completed_at END
+        completed_at = CASE WHEN ? IN ('completed', 'failed') THEN ? ELSE completed_at END,
+        review_status = ?, review_feedback = ?
     WHERE id = ?
   `);
 
@@ -399,6 +436,8 @@ export function updateChunk(id: string, data: { title?: string; description?: st
     data.error ?? existing.error ?? null,
     newStatus, now,  // For started_at
     newStatus, now,  // For completed_at
+    data.reviewStatus ?? existing.reviewStatus ?? null,
+    data.reviewFeedback ?? existing.reviewFeedback ?? null,
     id
   );
 
@@ -423,6 +462,45 @@ export function reorderChunks(specId: string, chunkIds: string[]): void {
   });
 
   transaction();
+}
+
+/**
+ * Insert a fix chunk after another chunk.
+ * Shifts all subsequent chunks down by one position.
+ */
+export function insertFixChunk(afterChunkId: string, fixData: { title: string; description: string }): Chunk | null {
+  const database = getDb();
+
+  // Get the original chunk to know its specId and order
+  const originalChunk = getChunk(afterChunkId);
+  if (!originalChunk) return null;
+
+  const newOrder = originalChunk.order + 1;
+
+  // Shift all chunks after the original chunk down by one
+  const shiftStmt = database.prepare(`
+    UPDATE chunks
+    SET "order" = "order" + 1
+    WHERE spec_id = ? AND "order" >= ?
+  `);
+  shiftStmt.run(originalChunk.specId, newOrder);
+
+  // Create the fix chunk
+  const id = generateId();
+  const stmt = database.prepare(`
+    INSERT INTO chunks (id, spec_id, title, description, "order", status)
+    VALUES (?, ?, ?, ?, ?, 'pending')
+  `);
+  stmt.run(id, originalChunk.specId, fixData.title, fixData.description, newOrder);
+
+  return {
+    id,
+    specId: originalChunk.specId,
+    title: fixData.title,
+    description: fixData.description,
+    order: newOrder,
+    status: 'pending',
+  };
 }
 
 // ============================================================================

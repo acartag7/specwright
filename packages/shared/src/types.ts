@@ -42,6 +42,20 @@ export interface Chunk {
   error?: string;
   startedAt?: number;
   completedAt?: number;
+  // Review fields
+  reviewStatus?: ReviewStatus;
+  reviewFeedback?: string;
+}
+
+export type ReviewStatus = 'pass' | 'needs_fix' | 'fail';
+
+export interface ReviewResult {
+  status: ReviewStatus;
+  feedback: string;
+  fixChunk?: {
+    title: string;
+    description: string;
+  };
 }
 
 export type ChunkStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';

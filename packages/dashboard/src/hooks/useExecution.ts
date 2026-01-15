@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import type { Chunk, ChunkToolCall, ChunkStatus } from '@glm/shared';
+import type { Chunk, ChunkToolCall, ChunkStatus, ReviewResult, ReviewStatus } from '@glm/shared';
 
 interface ExecutionState {
   isRunning: boolean;
@@ -11,6 +11,10 @@ interface ExecutionState {
   output: string;
   error: string | null;
   startedAt: number | null;
+  // Review state
+  isReviewing: boolean;
+  reviewResult: ReviewResult | null;
+  fixChunkId: string | null;
 }
 
 interface UseExecutionReturn {
@@ -19,6 +23,9 @@ interface UseExecutionReturn {
   abortChunk: (chunkId: string) => Promise<void>;
   watchChunk: (chunkId: string) => void;
   stopWatching: () => void;
+  // Review functions
+  reviewChunk: (chunkId: string) => Promise<ReviewResult | null>;
+  clearReview: () => void;
 }
 
 export function useExecution(): UseExecutionReturn {
@@ -30,6 +37,9 @@ export function useExecution(): UseExecutionReturn {
     output: '',
     error: null,
     startedAt: null,
+    isReviewing: false,
+    reviewResult: null,
+    fixChunkId: null,
   });
 
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -65,6 +75,9 @@ export function useExecution(): UseExecutionReturn {
           output: data.chunk.output || '',
           error: data.chunk.error || null,
           startedAt: Date.now(),
+          isReviewing: false,
+          reviewResult: null,
+          fixChunkId: null,
         });
       } catch (err) {
         console.error('Error parsing init event:', err);
@@ -165,6 +178,9 @@ export function useExecution(): UseExecutionReturn {
       output: '',
       error: null,
       startedAt: null,
+      isReviewing: false,
+      reviewResult: null,
+      fixChunkId: null,
     });
   }, [cleanup]);
 
@@ -181,7 +197,7 @@ export function useExecution(): UseExecutionReturn {
         throw new Error(data.error || 'Failed to start execution');
       }
 
-      // Start watching
+      // Start watching - reset review state as well
       setState({
         isRunning: true,
         chunkId,
@@ -190,6 +206,9 @@ export function useExecution(): UseExecutionReturn {
         output: '',
         error: null,
         startedAt: Date.now(),
+        isReviewing: false,
+        reviewResult: null,
+        fixChunkId: null,
       });
 
       // Give it a moment to start, then watch
@@ -234,11 +253,65 @@ export function useExecution(): UseExecutionReturn {
     return () => cleanup();
   }, [cleanup]);
 
+  // Review a completed chunk
+  const reviewChunk = useCallback(async (chunkId: string): Promise<ReviewResult | null> => {
+    try {
+      setState(prev => ({
+        ...prev,
+        isReviewing: true,
+        reviewResult: null,
+        fixChunkId: null,
+      }));
+
+      const response = await fetch(`/api/chunks/${chunkId}/review`, {
+        method: 'POST',
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || 'Failed to review chunk');
+      }
+
+      const result = await response.json();
+
+      setState(prev => ({
+        ...prev,
+        isReviewing: false,
+        reviewResult: {
+          status: result.status,
+          feedback: result.feedback,
+          fixChunk: result.fixChunk,
+        },
+        fixChunkId: result.fixChunkId || null,
+      }));
+
+      return result;
+    } catch (err) {
+      setState(prev => ({
+        ...prev,
+        isReviewing: false,
+        error: err instanceof Error ? err.message : 'Failed to review chunk',
+      }));
+      return null;
+    }
+  }, []);
+
+  // Clear review state
+  const clearReview = useCallback(() => {
+    setState(prev => ({
+      ...prev,
+      reviewResult: null,
+      fixChunkId: null,
+    }));
+  }, []);
+
   return {
     state,
     runChunk,
     abortChunk,
     watchChunk,
     stopWatching,
+    reviewChunk,
+    clearReview,
   };
 }
