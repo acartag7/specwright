@@ -140,28 +140,28 @@ export default function ChunkList({
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between mb-3 flex-shrink-0">
-        <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wide">
-          Chunks ({chunks.length})
+      <div className="flex items-center justify-between mb-2 flex-shrink-0">
+        <h2 className="text-xs font-mono text-neutral-500 uppercase tracking-wide">
+          chunks ({chunks.length})
         </h2>
         <button
           onClick={() => setIsCreating(true)}
           disabled={isLoading}
-          className="text-xs bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50 flex items-center gap-1.5"
+          className="text-[10px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/20 px-2 py-0.5 rounded transition-colors disabled:opacity-50 flex items-center gap-1"
         >
-          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
           </svg>
-          Add Chunk
+          add chunk
         </button>
       </div>
 
       {/* Chunks list */}
-      <div className="flex-1 overflow-auto min-h-0 space-y-2">
+      <div className="flex-1 overflow-auto min-h-0 space-y-1.5">
         {chunks.length === 0 ? (
-          <div className="bg-gray-900/50 border border-dashed border-gray-700 rounded-lg p-8 text-center">
-            <p className="text-gray-500 text-sm">
-              No chunks yet. Break your spec into executable tasks.
+          <div className="bg-neutral-900/50 border border-dashed border-neutral-800 rounded-md p-6 text-center">
+            <p className="text-neutral-600 text-xs font-mono">
+              no chunks yet. break your spec into executable tasks.
             </p>
           </div>
         ) : (

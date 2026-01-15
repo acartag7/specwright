@@ -145,9 +145,9 @@ export default function ProjectWorkspace() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="flex items-center gap-3 text-gray-400">
-          <svg className="animate-spin w-5 h-5" fill="none" viewBox="0 0 24 24">
+      <div className="min-h-screen bg-neutral-950 flex items-center justify-center">
+        <div className="flex items-center gap-3 text-neutral-400 font-mono">
+          <svg className="animate-spin w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
           </svg>
@@ -159,14 +159,14 @@ export default function ProjectWorkspace() {
 
   if (error || !data) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen bg-neutral-950 flex items-center justify-center">
         <div className="text-center">
-          <h2 className="text-xl font-semibold text-gray-200 mb-2">
+          <h2 className="text-xl font-medium text-neutral-100 mb-2 font-mono">
             {error || 'Project not found'}
           </h2>
           <Link
             href="/"
-            className="text-blue-400 hover:text-blue-300 text-sm"
+            className="text-emerald-400 hover:text-emerald-300 text-sm font-mono"
           >
             Back to projects
           </Link>
@@ -195,34 +195,33 @@ export default function ProjectWorkspace() {
     || (isCurrentlyRunning ? null : (chunkHistory?.chunk.error || null));
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="min-h-screen bg-neutral-950 flex flex-col bg-[linear-gradient(rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:64px_64px]">
       {/* Header */}
-      <header className="border-b border-gray-800 bg-gray-950/80 backdrop-blur-sm sticky top-0 z-10">
-        <div className="px-6 py-4 flex items-center gap-4">
+      <header className="border-b border-neutral-800/80 bg-neutral-950/90 backdrop-blur-sm sticky top-0 z-10">
+        <div className="px-6 py-3 flex items-center gap-4">
           <Link
             href="/"
-            className="p-1.5 text-gray-400 hover:text-gray-200 hover:bg-gray-800 rounded-lg transition-colors"
+            className="p-1.5 text-neutral-500 hover:text-neutral-300 hover:bg-neutral-800 rounded-md transition-colors"
             title="Back to projects"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
             </svg>
           </Link>
-          <div className="flex-1 min-w-0">
-            <h1 className="text-lg font-semibold text-gray-100 truncate">
-              {project.name}
-            </h1>
-            <p className="text-xs text-gray-500 truncate font-mono">
-              {project.directory}
-            </p>
+          <div className="flex items-center gap-2 text-sm font-mono">
+            <span className="text-neutral-500">/</span>
+            <span className="text-neutral-400">project</span>
+            <span className="text-neutral-500">/</span>
+            <span className="text-neutral-100">{project.name}</span>
           </div>
+          <div className="flex-1" />
+          <p className="text-[10px] text-neutral-600 font-mono hidden md:block">
+            {project.directory}
+          </p>
           {executionState.isRunning && (
-            <div className="flex items-center gap-2 text-sm text-blue-400">
-              <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-              </svg>
-              Running...
+            <div className="flex items-center gap-2 text-xs font-mono">
+              <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="text-emerald-400">running</span>
             </div>
           )}
         </div>
@@ -231,9 +230,9 @@ export default function ProjectWorkspace() {
       {/* Main Content - Two Column Layout */}
       <div className="flex-1 flex min-h-0">
         {/* Left Column - Spec & Chunks */}
-        <div className="w-1/2 border-r border-gray-800 flex flex-col min-h-0">
+        <div className="w-1/2 border-r border-neutral-800 flex flex-col min-h-0">
           {/* Spec Section */}
-          <div className="flex-1 p-6 border-b border-gray-800 min-h-0 overflow-auto">
+          <div className="flex-[2] p-4 border-b border-neutral-800 min-h-[300px] overflow-auto">
             {spec && (
               <SpecEditor
                 spec={spec}
@@ -244,7 +243,7 @@ export default function ProjectWorkspace() {
           </div>
 
           {/* Chunks Section */}
-          <div className="flex-1 p-6 min-h-0 overflow-auto">
+          <div className="flex-1 p-4 min-h-0 overflow-auto">
             <ChunkList
               projectId={projectId}
               chunks={chunks}
@@ -259,7 +258,7 @@ export default function ProjectWorkspace() {
 
         {/* Right Column - Execution */}
         <div className="w-1/2 flex flex-col min-h-0">
-          <div className="flex-1 p-6 overflow-auto">
+          <div className="flex-1 p-4 overflow-auto">
             <ExecutionPanel
               chunk={displayChunk || null}
               toolCalls={displayToolCalls}

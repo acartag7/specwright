@@ -20,35 +20,41 @@ interface ChunkItemProps {
 const statusConfig = {
   pending: {
     icon: '○',
-    color: 'text-gray-400',
-    bg: 'bg-gray-800',
+    color: 'text-neutral-500',
+    bg: 'bg-neutral-900/50',
     label: 'Pending',
   },
   running: {
     icon: '◐',
-    color: 'text-blue-400',
-    bg: 'bg-blue-900/30',
+    color: 'text-amber-400',
+    bg: 'bg-amber-900/20',
     label: 'Running',
   },
   completed: {
     icon: '✓',
-    color: 'text-green-400',
-    bg: 'bg-green-900/30',
+    color: 'text-emerald-400',
+    bg: 'bg-emerald-900/20',
     label: 'Completed',
   },
   failed: {
     icon: '✕',
     color: 'text-red-400',
-    bg: 'bg-red-900/30',
+    bg: 'bg-red-900/20',
     label: 'Failed',
   },
   cancelled: {
     icon: '⊘',
-    color: 'text-yellow-400',
-    bg: 'bg-yellow-900/20',
+    color: 'text-amber-400',
+    bg: 'bg-amber-900/10',
     label: 'Cancelled',
   },
 };
+
+// Truncate text to ~100 chars
+function truncateText(text: string, maxLength: number = 100): string {
+  if (text.length <= maxLength) return text;
+  return text.slice(0, maxLength).trim() + '...';
+}
 
 export default function ChunkItem({
   chunk,
@@ -69,14 +75,14 @@ export default function ChunkItem({
 
   return (
     <div
-      className={`${status.bg} border ${isSelected ? 'border-blue-500' : 'border-gray-800'} rounded-lg p-3 group cursor-pointer hover:border-gray-600 transition-colors`}
+      className={`${status.bg} border ${isSelected ? 'border-emerald-500/50' : 'border-neutral-800'} rounded-md p-2.5 group cursor-pointer hover:border-neutral-700 transition-colors`}
       onClick={onClick}
     >
-      <div className="flex items-start gap-3">
+      <div className="flex items-start gap-2.5">
         {/* Status indicator */}
-        <div className={`flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-full ${status.color} font-medium text-sm`}>
+        <div className={`flex-shrink-0 w-5 h-5 flex items-center justify-center ${status.color} font-mono text-xs`}>
           {isRunning ? (
-            <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+            <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
             </svg>
@@ -88,34 +94,36 @@ export default function ChunkItem({
         {/* Content */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-500 font-mono">{index + 1}.</span>
-            <h4 className="font-medium text-gray-200 truncate">{chunk.title}</h4>
+            <span className="text-[10px] text-neutral-600 font-mono">{index + 1}.</span>
+            <h4 className="text-sm font-medium text-neutral-200 font-mono truncate">{chunk.title}</h4>
           </div>
-          <p className="text-sm text-gray-400 mt-1 line-clamp-2">{chunk.description}</p>
+          <p className="text-xs text-neutral-500 mt-1 font-mono" title={chunk.description}>
+            {truncateText(chunk.description, 80)}
+          </p>
 
           {/* Status info */}
           {chunk.status === 'completed' && chunk.completedAt && (
-            <p className="text-xs text-gray-500 mt-2">
-              Completed {new Date(chunk.completedAt).toLocaleTimeString()}
+            <p className="text-[10px] text-neutral-600 mt-1.5 font-mono">
+              completed {new Date(chunk.completedAt).toLocaleTimeString()}
             </p>
           )}
           {chunk.status === 'failed' && chunk.error && (
-            <p className="text-xs text-red-400 mt-2 line-clamp-1">
-              Error: {chunk.error}
+            <p className="text-[10px] text-red-400 mt-1.5 font-mono truncate">
+              error: {chunk.error}
             </p>
           )}
         </div>
 
         {/* Actions */}
-        <div className="flex-shrink-0 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
+        <div className="flex-shrink-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
           {/* Move up */}
           <button
             onClick={onMoveUp}
             disabled={isFirst || isRunning}
-            className="p-1.5 text-gray-500 hover:text-gray-300 hover:bg-gray-700 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            className="p-1 text-neutral-600 hover:text-neutral-300 hover:bg-neutral-800 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
             title="Move up"
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
             </svg>
           </button>
@@ -124,10 +132,10 @@ export default function ChunkItem({
           <button
             onClick={onMoveDown}
             disabled={isLast || isRunning}
-            className="p-1.5 text-gray-500 hover:text-gray-300 hover:bg-gray-700 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            className="p-1 text-neutral-600 hover:text-neutral-300 hover:bg-neutral-800 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
             title="Move down"
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
             </svg>
           </button>
@@ -136,10 +144,10 @@ export default function ChunkItem({
           <button
             onClick={onEdit}
             disabled={isRunning}
-            className="p-1.5 text-gray-500 hover:text-gray-300 hover:bg-gray-700 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            className="p-1 text-neutral-600 hover:text-neutral-300 hover:bg-neutral-800 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
             title="Edit"
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
             </svg>
           </button>
@@ -148,10 +156,10 @@ export default function ChunkItem({
           <button
             onClick={onDelete}
             disabled={isRunning}
-            className="p-1.5 text-gray-500 hover:text-red-400 hover:bg-gray-700 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            className="p-1 text-neutral-600 hover:text-red-400 hover:bg-neutral-800 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
             title="Delete"
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
             </svg>
           </button>
@@ -161,10 +169,10 @@ export default function ChunkItem({
             <button
               onClick={onRun}
               disabled={isRunning}
-              className="p-1.5 text-green-500 hover:text-green-400 hover:bg-gray-700 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              className="p-1 text-emerald-500 hover:text-emerald-400 hover:bg-neutral-800 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
               title={chunk.status === 'failed' ? 'Retry' : 'Run'}
             >
-              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+              <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M8 5v14l11-7z" />
               </svg>
             </button>
@@ -173,10 +181,10 @@ export default function ChunkItem({
           {/* Stop (when running) */}
           {chunk.status === 'running' && (
             <button
-              className="p-1.5 text-red-500 hover:text-red-400 hover:bg-gray-700 rounded transition-colors"
+              className="p-1 text-red-500 hover:text-red-400 hover:bg-neutral-800 rounded transition-colors"
               title="Stop"
             >
-              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+              <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
                 <rect x="6" y="6" width="12" height="12" />
               </svg>
             </button>
