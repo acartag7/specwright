@@ -6,7 +6,7 @@ import ChunkItem from './ChunkItem';
 import ChunkEditor from './ChunkEditor';
 
 interface ChunkListProps {
-  projectId: string;
+  specId: string;
   chunks: Chunk[];
   onChunksChange?: (chunks: Chunk[]) => void;
   onRunChunk?: (chunk: Chunk) => void;
@@ -16,7 +16,7 @@ interface ChunkListProps {
 }
 
 export default function ChunkList({
-  projectId,
+  specId,
   chunks,
   onChunksChange,
   onRunChunk,
@@ -32,7 +32,7 @@ export default function ChunkList({
   const handleCreate = useCallback(async (data: { title: string; description: string }) => {
     try {
       setIsLoading(true);
-      const response = await fetch(`/api/projects/${projectId}/chunks`, {
+      const response = await fetch(`/api/specs/${specId}/chunks`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -51,13 +51,13 @@ export default function ChunkList({
     } finally {
       setIsLoading(false);
     }
-  }, [projectId, chunks, onChunksChange]);
+  }, [specId, chunks, onChunksChange]);
 
   // Update chunk
   const handleUpdate = useCallback(async (chunk: Chunk, data: { title: string; description: string }) => {
     try {
       setIsLoading(true);
-      const response = await fetch(`/api/projects/${projectId}/chunks/${chunk.id}`, {
+      const response = await fetch(`/api/chunks/${chunk.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -76,7 +76,7 @@ export default function ChunkList({
     } finally {
       setIsLoading(false);
     }
-  }, [projectId, chunks, onChunksChange]);
+  }, [chunks, onChunksChange]);
 
   // Delete chunk
   const handleDelete = useCallback(async (chunk: Chunk) => {
@@ -84,7 +84,7 @@ export default function ChunkList({
 
     try {
       setIsLoading(true);
-      const response = await fetch(`/api/projects/${projectId}/chunks/${chunk.id}`, {
+      const response = await fetch(`/api/chunks/${chunk.id}`, {
         method: 'DELETE',
       });
 
@@ -99,7 +99,7 @@ export default function ChunkList({
     } finally {
       setIsLoading(false);
     }
-  }, [projectId, chunks, onChunksChange]);
+  }, [chunks, onChunksChange]);
 
   // Move chunk up/down
   const handleMove = useCallback(async (chunk: Chunk, direction: 'up' | 'down') => {
@@ -118,7 +118,7 @@ export default function ChunkList({
 
     // Persist to server
     try {
-      const response = await fetch(`/api/projects/${projectId}/chunks/reorder`, {
+      const response = await fetch(`/api/specs/${specId}/chunks/reorder`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ chunkIds: newChunks.map(c => c.id) }),
@@ -135,7 +135,7 @@ export default function ChunkList({
     } catch (err) {
       console.error('Failed to reorder chunks:', err);
     }
-  }, [projectId, chunks, onChunksChange]);
+  }, [specId, chunks, onChunksChange]);
 
   return (
     <div className="h-full flex flex-col">

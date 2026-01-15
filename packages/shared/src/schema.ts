@@ -24,6 +24,10 @@ CREATE TABLE IF NOT EXISTS specs (
   title TEXT NOT NULL,
   content TEXT NOT NULL DEFAULT '',
   version INTEGER DEFAULT 1,
+  status TEXT DEFAULT 'draft',
+  branch_name TEXT,
+  pr_number INTEGER,
+  pr_url TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
@@ -57,11 +61,27 @@ CREATE TABLE IF NOT EXISTS chunk_tool_calls (
   FOREIGN KEY (chunk_id) REFERENCES chunks(id) ON DELETE CASCADE
 );
 
+-- Spec Studio State (for wizard persistence)
+CREATE TABLE IF NOT EXISTS spec_studio_state (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL UNIQUE,
+  step TEXT NOT NULL DEFAULT 'intent',
+  intent TEXT DEFAULT '',
+  questions TEXT DEFAULT '[]',
+  answers TEXT DEFAULT '{}',
+  generated_spec TEXT DEFAULT '',
+  suggested_chunks TEXT DEFAULT '[]',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_specs_project ON specs(project_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_spec ON chunks(spec_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_status ON chunks(status);
 CREATE INDEX IF NOT EXISTS idx_chunk_tool_calls_chunk ON chunk_tool_calls(chunk_id);
+CREATE INDEX IF NOT EXISTS idx_studio_project ON spec_studio_state(project_id);
 `;
 
 // ============================================================================
@@ -190,4 +210,15 @@ export const MIGRATIONS_V1_TO_V2 = [
   `CREATE INDEX IF NOT EXISTS idx_tool_calls_state ON tool_calls(state)`,
   `CREATE INDEX IF NOT EXISTS idx_output_chunks_task ON task_output_chunks(task_id)`,
   `CREATE INDEX IF NOT EXISTS idx_file_ops_task ON file_operations(task_id)`,
+];
+
+/**
+ * Migration queries for Phase 2 (Multi-Spec support)
+ * These add new columns to the specs table
+ */
+export const MIGRATIONS_PHASE2 = [
+  `ALTER TABLE specs ADD COLUMN status TEXT DEFAULT 'draft'`,
+  `ALTER TABLE specs ADD COLUMN branch_name TEXT`,
+  `ALTER TABLE specs ADD COLUMN pr_number INTEGER`,
+  `ALTER TABLE specs ADD COLUMN pr_url TEXT`,
 ];

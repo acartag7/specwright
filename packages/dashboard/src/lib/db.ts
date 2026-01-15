@@ -2,8 +2,8 @@ import Database, { type Database as DatabaseType } from 'better-sqlite3';
 import path from 'path';
 import os from 'os';
 import { existsSync, mkdirSync } from 'fs';
-import { MVP_SCHEMA } from '@glm/shared';
-import type { Project, Spec, Chunk, ChunkToolCall } from '@glm/shared';
+import { MVP_SCHEMA, MIGRATIONS_PHASE2 } from '@glm/shared';
+import type { Project, Spec, Chunk, ChunkToolCall, SpecStudioState, SpecStudioStep, Question, ChunkSuggestion, SpecStatus } from '@glm/shared';
 
 const DB_DIR = path.join(os.homedir(), '.glm-orchestrator');
 const DB_PATH = path.join(DB_DIR, 'orchestrator.db');
@@ -25,7 +25,30 @@ function getDb(): DatabaseType {
   // Initialize MVP schema
   db.exec(MVP_SCHEMA);
 
+  // Run Phase 2 migrations (add columns to specs table)
+  runPhase2Migrations(db);
+
   return db;
+}
+
+function runPhase2Migrations(database: DatabaseType): void {
+  // Check if migration is needed by checking if 'status' column exists
+  const tableInfo = database.prepare(`PRAGMA table_info(specs)`).all() as { name: string }[];
+  const hasStatusColumn = tableInfo.some(col => col.name === 'status');
+
+  if (!hasStatusColumn) {
+    for (const migration of MIGRATIONS_PHASE2) {
+      try {
+        database.exec(migration);
+      } catch (err) {
+        // Column might already exist, ignore
+        const message = err instanceof Error ? err.message : String(err);
+        if (!message.includes('duplicate column')) {
+          console.warn(`Migration warning: ${message}`);
+        }
+      }
+    }
+  }
 }
 
 // ============================================================================
@@ -87,13 +110,7 @@ export function createProject(data: { name: string; directory: string; descripti
   `);
   stmt.run(id, data.name, data.directory, data.description ?? null, now, now);
 
-  // Create initial empty spec for the project
-  const specId = generateId();
-  const specStmt = database.prepare(`
-    INSERT INTO specs (id, project_id, title, content, version, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `);
-  specStmt.run(specId, id, 'Untitled Spec', '', 1, now, now);
+  // Note: No longer auto-creating a spec. Multi-spec support means specs are created explicitly.
 
   return {
     id,
@@ -144,6 +161,10 @@ interface SpecRow {
   title: string;
   content: string;
   version: number;
+  status: string | null;
+  branch_name: string | null;
+  pr_number: number | null;
+  pr_url: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -155,6 +176,10 @@ function rowToSpec(row: SpecRow): Spec {
     title: row.title,
     content: row.content,
     version: row.version,
+    status: (row.status as SpecStatus) || 'draft',
+    branchName: row.branch_name ?? undefined,
+    prNumber: row.pr_number ?? undefined,
+    prUrl: row.pr_url ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -167,6 +192,15 @@ export function getSpec(id: string): Spec | null {
   return row ? rowToSpec(row) : null;
 }
 
+export function getSpecsByProject(projectId: string): Spec[] {
+  const database = getDb();
+  const stmt = database.prepare(`
+    SELECT * FROM specs WHERE project_id = ?
+    ORDER BY created_at ASC
+  `);
+  return (stmt.all(projectId) as SpecRow[]).map(rowToSpec);
+}
+
 export function getSpecByProject(projectId: string): Spec | null {
   const database = getDb();
   const stmt = database.prepare(`
@@ -177,7 +211,44 @@ export function getSpecByProject(projectId: string): Spec | null {
   return row ? rowToSpec(row) : null;
 }
 
-export function updateSpec(id: string, data: { title?: string; content?: string }): Spec | null {
+export function createSpec(projectId: string, title: string, content?: string): Spec {
+  const database = getDb();
+  const id = generateId();
+  const now = Date.now();
+
+  const stmt = database.prepare(`
+    INSERT INTO specs (id, project_id, title, content, version, status, created_at, updated_at)
+    VALUES (?, ?, ?, ?, 1, 'draft', ?, ?)
+  `);
+  stmt.run(id, projectId, title, content ?? '', now, now);
+
+  // Update parent project's updated_at
+  const projectStmt = database.prepare(`UPDATE projects SET updated_at = ? WHERE id = ?`);
+  projectStmt.run(now, projectId);
+
+  return {
+    id,
+    projectId,
+    title,
+    content: content ?? '',
+    version: 1,
+    status: 'draft',
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+export function updateSpec(
+  id: string,
+  data: {
+    title?: string;
+    content?: string;
+    status?: SpecStatus;
+    branchName?: string;
+    prNumber?: number;
+    prUrl?: string;
+  }
+): Spec | null {
   const database = getDb();
   const stmt = database.prepare(`SELECT * FROM specs WHERE id = ?`);
   const existing = stmt.get(id) as SpecRow | undefined;
@@ -186,12 +257,16 @@ export function updateSpec(id: string, data: { title?: string; content?: string 
   const now = Date.now();
   const updateStmt = database.prepare(`
     UPDATE specs
-    SET title = ?, content = ?, version = version + 1, updated_at = ?
+    SET title = ?, content = ?, status = ?, branch_name = ?, pr_number = ?, pr_url = ?, version = version + 1, updated_at = ?
     WHERE id = ?
   `);
   updateStmt.run(
     data.title ?? existing.title,
     data.content ?? existing.content,
+    data.status ?? existing.status ?? 'draft',
+    data.branchName ?? existing.branch_name,
+    data.prNumber ?? existing.pr_number,
+    data.prUrl ?? existing.pr_url,
     now,
     id
   );
@@ -202,6 +277,25 @@ export function updateSpec(id: string, data: { title?: string; content?: string 
 
   const result = database.prepare(`SELECT * FROM specs WHERE id = ?`).get(id) as SpecRow;
   return rowToSpec(result);
+}
+
+export function deleteSpec(id: string): boolean {
+  const database = getDb();
+
+  // Get spec to update project's updated_at
+  const spec = getSpec(id);
+  if (!spec) return false;
+
+  const stmt = database.prepare(`DELETE FROM specs WHERE id = ?`);
+  const result = stmt.run(id);
+
+  if (result.changes > 0) {
+    // Update parent project's updated_at
+    const projectStmt = database.prepare(`UPDATE projects SET updated_at = ? WHERE id = ?`);
+    projectStmt.run(Date.now(), spec.projectId);
+  }
+
+  return result.changes > 0;
 }
 
 // ============================================================================
@@ -407,6 +501,112 @@ export function updateToolCall(id: string, data: { status?: ChunkToolCall['statu
 
   const result = database.prepare(`SELECT * FROM chunk_tool_calls WHERE id = ?`).get(id) as ToolCallRow;
   return rowToToolCall(result);
+}
+
+// ============================================================================
+// Spec Studio State Operations
+// ============================================================================
+
+interface StudioStateRow {
+  id: string;
+  project_id: string;
+  step: string;
+  intent: string;
+  questions: string;
+  answers: string;
+  generated_spec: string;
+  suggested_chunks: string;
+  created_at: number;
+  updated_at: number;
+}
+
+function rowToStudioState(row: StudioStateRow): SpecStudioState {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    step: row.step as SpecStudioStep,
+    intent: row.intent,
+    questions: JSON.parse(row.questions) as Question[],
+    answers: JSON.parse(row.answers) as Record<string, string | string[]>,
+    generatedSpec: row.generated_spec,
+    suggestedChunks: JSON.parse(row.suggested_chunks) as ChunkSuggestion[],
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function getStudioState(projectId: string): SpecStudioState | null {
+  const database = getDb();
+  const stmt = database.prepare(`SELECT * FROM spec_studio_state WHERE project_id = ?`);
+  const row = stmt.get(projectId) as StudioStateRow | undefined;
+  return row ? rowToStudioState(row) : null;
+}
+
+export function createStudioState(projectId: string): SpecStudioState {
+  const database = getDb();
+  const id = generateId();
+  const now = Date.now();
+
+  const stmt = database.prepare(`
+    INSERT INTO spec_studio_state (id, project_id, step, intent, questions, answers, generated_spec, suggested_chunks, created_at, updated_at)
+    VALUES (?, ?, 'intent', '', '[]', '{}', '', '[]', ?, ?)
+  `);
+  stmt.run(id, projectId, now, now);
+
+  return {
+    id,
+    projectId,
+    step: 'intent',
+    intent: '',
+    questions: [],
+    answers: {},
+    generatedSpec: '',
+    suggestedChunks: [],
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+export function updateStudioState(
+  projectId: string,
+  data: {
+    step?: SpecStudioStep;
+    intent?: string;
+    questions?: Question[];
+    answers?: Record<string, string | string[]>;
+    generatedSpec?: string;
+    suggestedChunks?: ChunkSuggestion[];
+  }
+): SpecStudioState | null {
+  const database = getDb();
+  const existing = getStudioState(projectId);
+  if (!existing) return null;
+
+  const now = Date.now();
+  const stmt = database.prepare(`
+    UPDATE spec_studio_state
+    SET step = ?, intent = ?, questions = ?, answers = ?, generated_spec = ?, suggested_chunks = ?, updated_at = ?
+    WHERE project_id = ?
+  `);
+  stmt.run(
+    data.step ?? existing.step,
+    data.intent ?? existing.intent,
+    JSON.stringify(data.questions ?? existing.questions),
+    JSON.stringify(data.answers ?? existing.answers),
+    data.generatedSpec ?? existing.generatedSpec,
+    JSON.stringify(data.suggestedChunks ?? existing.suggestedChunks),
+    now,
+    projectId
+  );
+
+  return getStudioState(projectId);
+}
+
+export function deleteStudioState(projectId: string): boolean {
+  const database = getDb();
+  const stmt = database.prepare(`DELETE FROM spec_studio_state WHERE project_id = ?`);
+  const result = stmt.run(projectId);
+  return result.changes > 0;
 }
 
 export { getDb };

@@ -5,11 +5,10 @@ import type { Spec } from '@glm/shared';
 
 interface SpecEditorProps {
   spec: Spec;
-  projectId: string;
   onUpdate?: (spec: Spec) => void;
 }
 
-export default function SpecEditor({ spec, projectId, onUpdate }: SpecEditorProps) {
+export default function SpecEditor({ spec, onUpdate }: SpecEditorProps) {
   const [content, setContent] = useState(spec.content);
   const [isSaving, setIsSaving] = useState(false);
   const [isRefining, setIsRefining] = useState(false);
@@ -24,7 +23,7 @@ export default function SpecEditor({ spec, projectId, onUpdate }: SpecEditorProp
       setIsSaving(true);
       setError(null);
 
-      const response = await fetch(`/api/projects/${projectId}/spec`, {
+      const response = await fetch(`/api/specs/${spec.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: newContent }),
@@ -43,7 +42,7 @@ export default function SpecEditor({ spec, projectId, onUpdate }: SpecEditorProp
     } finally {
       setIsSaving(false);
     }
-  }, [projectId, onUpdate]);
+  }, [spec.id, onUpdate]);
 
   // Debounced save on content change
   const handleContentChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -80,7 +79,7 @@ export default function SpecEditor({ spec, projectId, onUpdate }: SpecEditorProp
       setIsRefining(true);
       setError(null);
 
-      const response = await fetch(`/api/projects/${projectId}/spec/refine`, {
+      const response = await fetch(`/api/specs/${spec.id}/refine`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
@@ -100,7 +99,7 @@ export default function SpecEditor({ spec, projectId, onUpdate }: SpecEditorProp
     } finally {
       setIsRefining(false);
     }
-  }, [content, projectId, onUpdate]);
+  }, [content, spec.id, onUpdate]);
 
   // Cleanup timeout on unmount
   useEffect(() => {

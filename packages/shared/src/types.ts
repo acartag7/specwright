@@ -15,12 +15,18 @@ export interface Project {
   updatedAt: number;
 }
 
+export type SpecStatus = 'draft' | 'ready' | 'running' | 'review' | 'completed' | 'merged';
+
 export interface Spec {
   id: string;
   projectId: string;
   title: string;
   content: string;
   version: number;
+  status: SpecStatus;
+  branchName?: string;
+  prNumber?: number;
+  prUrl?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -78,9 +84,18 @@ export interface UpdateChunkRequest {
   order?: number;
 }
 
+export interface CreateSpecRequest {
+  title: string;
+  content?: string;
+}
+
 export interface UpdateSpecRequest {
   title?: string;
   content?: string;
+  status?: SpecStatus;
+  branchName?: string;
+  prNumber?: number;
+  prUrl?: string;
 }
 
 export interface RefineSpecRequest {
@@ -379,4 +394,94 @@ export interface LiveSession {
   toolCalls: ToolCallEvent[];
   textOutput: string;
   startedAt: number;
+}
+
+// ============================================================================
+// Spec Studio Types
+// ============================================================================
+
+export interface SpecStudioState {
+  id: string;
+  projectId: string;
+  step: SpecStudioStep;
+  intent: string;
+  questions: Question[];
+  answers: Record<string, string | string[]>;
+  generatedSpec: string;
+  suggestedChunks: ChunkSuggestion[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type SpecStudioStep = 'intent' | 'questions' | 'review' | 'chunks' | 'complete';
+
+export interface Question {
+  id: string;
+  question: string;
+  type: QuestionType;
+  options?: string[];
+  required: boolean;
+}
+
+export type QuestionType = 'text' | 'choice' | 'multiselect';
+
+export interface ChunkSuggestion {
+  id: string;
+  title: string;
+  description: string;
+  selected: boolean;
+  order: number;
+}
+
+// Spec Studio API Request/Response types
+export interface UpdateStudioStateRequest {
+  step?: SpecStudioStep;
+  intent?: string;
+  questions?: Question[];
+  answers?: Record<string, string | string[]>;
+  generatedSpec?: string;
+  suggestedChunks?: ChunkSuggestion[];
+}
+
+export interface GenerateQuestionsRequest {
+  intent: string;
+}
+
+export interface GenerateQuestionsResponse {
+  questions: Question[];
+}
+
+export interface GenerateSpecRequest {
+  intent: string;
+  answers: Record<string, string | string[]>;
+}
+
+export interface GenerateSpecResponse {
+  spec: string;
+}
+
+export interface RefineSpecRequest {
+  spec: string;
+  feedback: string;
+}
+
+export interface RefineSpecResponse {
+  spec: string;
+}
+
+export interface GenerateChunksRequest {
+  spec: string;
+}
+
+export interface GenerateChunksResponse {
+  chunks: ChunkSuggestion[];
+}
+
+export interface CompleteStudioRequest {
+  spec: string;
+  chunks: ChunkSuggestion[];
+}
+
+export interface CompleteStudioResponse {
+  success: boolean;
 }

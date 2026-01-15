@@ -1,0 +1,321 @@
+'use client';
+
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
+import type { Project, Spec, Chunk, ChunkToolCall } from '@glm/shared';
+import SpecEditor from '@/components/SpecEditor';
+import ChunkList from '@/components/ChunkList';
+import ExecutionPanel from '@/components/ExecutionPanel';
+import ResizeHandle from '@/components/ResizeHandle';
+import { useExecution } from '@/hooks/useExecution';
+
+interface ChunkHistory {
+  chunk: Chunk;
+  toolCalls: ChunkToolCall[];
+}
+
+export default function SpecWorkspace() {
+  const params = useParams();
+  const router = useRouter();
+  const projectId = params.id as string;
+  const specId = params.specId as string;
+
+  const [project, setProject] = useState<Project | null>(null);
+  const [spec, setSpec] = useState<Spec | null>(null);
+  const [chunks, setChunks] = useState<Chunk[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedChunk, setSelectedChunk] = useState<Chunk | null>(null);
+  const [chunkHistory, setChunkHistory] = useState<ChunkHistory | null>(null);
+
+  // Panel sizes
+  const [leftPanelWidth, setLeftPanelWidth] = useState(50);
+  const [specPanelHeight, setSpecPanelHeight] = useState(60);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const leftColumnRef = useRef<HTMLDivElement>(null);
+
+  const { state: executionState, runChunk, abortChunk } = useExecution();
+
+  // Handle horizontal resize
+  const handleHorizontalResize = useCallback((delta: number) => {
+    if (!containerRef.current) return;
+    const containerWidth = containerRef.current.offsetWidth;
+    const deltaPercent = (delta / containerWidth) * 100;
+    setLeftPanelWidth(prev => Math.min(80, Math.max(20, prev + deltaPercent)));
+  }, []);
+
+  // Handle vertical resize
+  const handleVerticalResize = useCallback((delta: number) => {
+    if (!leftColumnRef.current) return;
+    const columnHeight = leftColumnRef.current.offsetHeight;
+    const deltaPercent = (delta / columnHeight) * 100;
+    setSpecPanelHeight(prev => Math.min(80, Math.max(20, prev + deltaPercent)));
+  }, []);
+
+  // Fetch project, spec, and chunks
+  useEffect(() => {
+    async function fetchData() {
+      try {
+        setIsLoading(true);
+
+        // Fetch project
+        const projectResponse = await fetch(`/api/projects/${projectId}`);
+        if (!projectResponse.ok) {
+          if (projectResponse.status === 404) {
+            throw new Error('Project not found');
+          }
+          throw new Error('Failed to load project');
+        }
+        const projectResult = await projectResponse.json();
+        setProject(projectResult.project);
+
+        // Fetch spec with chunks
+        const specResponse = await fetch(`/api/specs/${specId}`);
+        if (!specResponse.ok) {
+          if (specResponse.status === 404) {
+            throw new Error('Spec not found');
+          }
+          throw new Error('Failed to load spec');
+        }
+        const specResult = await specResponse.json();
+        setSpec(specResult.spec);
+        setChunks(specResult.chunks);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Unknown error');
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    fetchData();
+  }, [projectId, specId]);
+
+  // Handle spec updates
+  const handleSpecUpdate = useCallback((updatedSpec: Spec) => {
+    setSpec(updatedSpec);
+  }, []);
+
+  // Handle chunks updates
+  const handleChunksChange = useCallback((updatedChunks: Chunk[]) => {
+    setChunks(updatedChunks);
+    if (selectedChunk) {
+      const updated = updatedChunks.find(c => c.id === selectedChunk.id);
+      if (updated) setSelectedChunk(updated);
+    }
+  }, [selectedChunk]);
+
+  // Handle selecting a chunk to view its history
+  const handleSelectChunk = useCallback(async (chunk: Chunk) => {
+    setSelectedChunk(chunk);
+    if (chunk.status === 'completed' || chunk.status === 'failed' || chunk.status === 'cancelled') {
+      try {
+        const response = await fetch(`/api/chunks/${chunk.id}`);
+        if (response.ok) {
+          const data = await response.json();
+          setChunkHistory({ chunk: data.chunk, toolCalls: data.toolCalls });
+        }
+      } catch (err) {
+        console.error('Failed to load chunk history:', err);
+      }
+    } else {
+      setChunkHistory(null);
+    }
+  }, []);
+
+  // Handle running a chunk
+  const handleRunChunk = useCallback(async (chunk: Chunk) => {
+    setSelectedChunk(chunk);
+    try {
+      await runChunk(chunk.id);
+      // Refresh chunks
+      const response = await fetch(`/api/specs/${specId}/chunks`);
+      if (response.ok) {
+        const updatedChunks = await response.json();
+        setChunks(updatedChunks);
+      }
+    } catch (err) {
+      console.error('Failed to run chunk:', err);
+    }
+  }, [runChunk, specId]);
+
+  // Handle cancelling execution
+  const handleCancelExecution = useCallback(async () => {
+    if (executionState.chunkId) {
+      try {
+        await abortChunk(executionState.chunkId);
+        // Refresh chunks
+        const response = await fetch(`/api/specs/${specId}/chunks`);
+        if (response.ok) {
+          const updatedChunks = await response.json();
+          setChunks(updatedChunks);
+        }
+      } catch (err) {
+        console.error('Failed to abort chunk:', err);
+      }
+    }
+  }, [abortChunk, executionState.chunkId, specId]);
+
+  // Sync chunk status from execution state
+  useEffect(() => {
+    if (executionState.chunkId && executionState.status) {
+      setChunks(prev => prev.map(c =>
+        c.id === executionState.chunkId
+          ? { ...c, status: executionState.status! }
+          : c
+      ));
+    }
+  }, [executionState.chunkId, executionState.status]);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-neutral-950 flex items-center justify-center">
+        <div className="flex items-center gap-3 text-neutral-400 font-mono">
+          <svg className="animate-spin w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+          </svg>
+          Loading spec...
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !project || !spec) {
+    return (
+      <div className="min-h-screen bg-neutral-950 flex items-center justify-center">
+        <div className="text-center">
+          <h2 className="text-xl font-medium text-neutral-100 mb-2 font-mono">
+            {error || 'Not found'}
+          </h2>
+          <Link
+            href={`/project/${projectId}`}
+            className="text-emerald-400 hover:text-emerald-300 text-sm font-mono"
+          >
+            Back to project
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  // Determine what to show in the execution panel
+  const isCurrentlyRunning = executionState.isRunning && executionState.chunkId;
+  const displayChunk = isCurrentlyRunning
+    ? chunks.find(c => c.id === executionState.chunkId) || selectedChunk
+    : selectedChunk;
+
+  const displayToolCalls = isCurrentlyRunning
+    ? executionState.toolCalls
+    : (chunkHistory?.toolCalls || []);
+  const displayOutput = isCurrentlyRunning
+    ? executionState.output
+    : (chunkHistory?.chunk.output || '');
+  const displayError = executionState.error
+    || (isCurrentlyRunning ? null : (chunkHistory?.chunk.error || null));
+
+  return (
+    <div className="min-h-screen bg-neutral-950 flex flex-col bg-[linear-gradient(rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:64px_64px]">
+      {/* Header */}
+      <header className="border-b border-neutral-800/80 bg-neutral-950/90 backdrop-blur-sm sticky top-0 z-10">
+        <div className="px-6 py-3 flex items-center gap-4">
+          <Link
+            href={`/project/${projectId}`}
+            className="p-1.5 text-neutral-500 hover:text-neutral-300 hover:bg-neutral-800 rounded-md transition-colors"
+            title="Back to specs"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+            </svg>
+          </Link>
+          <div className="flex items-center gap-2 text-sm font-mono">
+            <span className="text-neutral-500">/</span>
+            <span className="text-neutral-400">project</span>
+            <span className="text-neutral-500">/</span>
+            <span className="text-neutral-400">{project.name}</span>
+            <span className="text-neutral-500">/</span>
+            <span className="text-neutral-100 truncate max-w-48">{spec.title}</span>
+          </div>
+          <div className="flex-1" />
+          <Link
+            href={`/project/${projectId}/spec/${specId}/edit`}
+            className="px-3 py-1.5 text-neutral-400 hover:text-neutral-200 border border-neutral-800 hover:border-neutral-700 rounded-md font-mono text-xs transition-colors flex items-center gap-1.5"
+            title="Edit spec in Studio wizard"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+            </svg>
+            Edit in Studio
+          </Link>
+          {executionState.isRunning && (
+            <div className="flex items-center gap-2 text-xs font-mono">
+              <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="text-emerald-400">running</span>
+            </div>
+          )}
+        </div>
+      </header>
+
+      {/* Main Content - Two Column Layout */}
+      <div ref={containerRef} className="flex-1 flex min-h-0">
+        {/* Left Column - Spec & Chunks */}
+        <div
+          ref={leftColumnRef}
+          className="flex flex-col min-h-0"
+          style={{ width: `${leftPanelWidth}%` }}
+        >
+          {/* Spec Section */}
+          <div
+            className="p-4 overflow-auto"
+            style={{ height: `${specPanelHeight}%` }}
+          >
+            <SpecEditor
+              spec={spec}
+              onUpdate={handleSpecUpdate}
+            />
+          </div>
+
+          {/* Vertical Resize Handle */}
+          <ResizeHandle direction="vertical" onResize={handleVerticalResize} />
+
+          {/* Chunks Section */}
+          <div
+            className="p-4 min-h-0 overflow-auto"
+            style={{ height: `${100 - specPanelHeight}%` }}
+          >
+            <ChunkList
+              specId={specId}
+              chunks={chunks}
+              onChunksChange={handleChunksChange}
+              onRunChunk={handleRunChunk}
+              onSelectChunk={handleSelectChunk}
+              runningChunkId={executionState.chunkId}
+              selectedChunkId={selectedChunk?.id}
+            />
+          </div>
+        </div>
+
+        {/* Horizontal Resize Handle */}
+        <ResizeHandle direction="horizontal" onResize={handleHorizontalResize} />
+
+        {/* Right Column - Execution */}
+        <div
+          className="flex flex-col min-h-0"
+          style={{ width: `${100 - leftPanelWidth}%` }}
+        >
+          <div className="flex-1 p-4 overflow-auto">
+            <ExecutionPanel
+              chunk={displayChunk || null}
+              toolCalls={displayToolCalls}
+              output={displayOutput}
+              error={displayError}
+              isRunning={executionState.isRunning}
+              startedAt={executionState.startedAt}
+              onCancel={executionState.isRunning ? handleCancelExecution : undefined}
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

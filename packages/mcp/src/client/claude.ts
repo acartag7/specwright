@@ -19,6 +19,34 @@ import type {
 
 const DEFAULT_MODEL = "claude-opus-4-5-20251101";
 const DEFAULT_TIMEOUT_MS = 300000; // 5 minutes
+// Try multiple possible paths for the claude CLI
+const CLAUDE_PATHS = [
+  process.env.CLAUDE_PATH,
+  "/opt/homebrew/bin/claude",
+  "/opt/homebrew/Caskroom/claude-code/2.1.7/claude",
+  "/usr/local/bin/claude",
+  "claude", // fallback to PATH
+].filter(Boolean) as string[];
+
+function findClaudePath(): string {
+  const { execSync } = require("child_process");
+  for (const p of CLAUDE_PATHS) {
+    try {
+      execSync(`test -x "${p}"`, { stdio: "ignore" });
+      return p;
+    } catch {
+      continue;
+    }
+  }
+  // Last resort: try which
+  try {
+    return execSync("which claude", { encoding: "utf-8" }).trim();
+  } catch {
+    return "claude";
+  }
+}
+
+const CLAUDE_PATH = findClaudePath();
 
 export interface ClaudeClientOptions {
   model?: string;
@@ -81,7 +109,7 @@ export class ClaudeClient {
     }
 
     return new Promise((resolve, reject) => {
-      const proc = spawn("claude", args, {
+      const proc = spawn(CLAUDE_PATH, args, {
         cwd: workingDirectory,
         stdio: ["ignore", "pipe", "pipe"],
       });
@@ -212,7 +240,7 @@ export class ClaudeClient {
       args.push("--system-prompt", systemPrompt);
     }
 
-    const proc = spawn("claude", args, {
+    const proc = spawn(CLAUDE_PATH, args, {
       cwd: workingDirectory,
       stdio: ["ignore", "pipe", "pipe"],
     });
