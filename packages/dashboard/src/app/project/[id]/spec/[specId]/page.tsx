@@ -8,6 +8,7 @@ import SpecEditor from '@/components/SpecEditor';
 import ChunkList from '@/components/ChunkList';
 import ExecutionPanel from '@/components/ExecutionPanel';
 import RunAllProgressPanel from '@/components/RunAllProgressPanel';
+import SpecCompletePanel from '@/components/SpecCompletePanel';
 import ResizeHandle from '@/components/ResizeHandle';
 import { useExecution } from '@/hooks/useExecution';
 import { useRunAll } from '@/hooks/useRunAll';
@@ -31,6 +32,8 @@ export default function SpecWorkspace() {
   const [selectedChunk, setSelectedChunk] = useState<Chunk | null>(null);
   const [chunkHistory, setChunkHistory] = useState<ChunkHistory | null>(null);
   const [showRunAllPanel, setShowRunAllPanel] = useState(false);
+  const [showCompletePanel, setShowCompletePanel] = useState(false);
+  const [gitError, setGitError] = useState<string | null>(null);
 
   // Run All state
   const {
@@ -245,12 +248,118 @@ export default function SpecWorkspace() {
     refreshChunks();
   }, [resetRunAll, refreshChunks]);
 
-  // Watch for run all completion to refresh chunks
+  // Watch for run all completion to refresh chunks and show complete panel
   useEffect(() => {
     if (!runAllState.isRunning && showRunAllPanel && runAllState.progress.current > 0) {
       refreshChunks();
     }
   }, [runAllState.isRunning, showRunAllPanel, runAllState.progress.current, refreshChunks]);
+
+  // Check if all chunks are completed to show completion panel
+  const allChunksCompleted = chunks.length > 0 && chunks.every(c => c.status === 'completed');
+  const hasPassedReview = chunks.every(c => c.reviewStatus === 'pass' || c.reviewStatus === undefined);
+  const showCompletionState = allChunksCompleted && hasPassedReview && !executionState.isRunning && !runAllState.isRunning;
+
+  // Auto-show complete panel when Run All finishes successfully
+  useEffect(() => {
+    if (showCompletionState && !showCompletePanel && showRunAllPanel && !runAllState.isRunning) {
+      setShowCompletePanel(true);
+      setShowRunAllPanel(false);
+    }
+  }, [showCompletionState, showCompletePanel, showRunAllPanel, runAllState.isRunning]);
+
+  // Refresh spec data
+  const refreshSpec = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/specs/${specId}`);
+      if (response.ok) {
+        const data = await response.json();
+        setSpec(data.spec);
+      }
+    } catch (err) {
+      console.error('Failed to refresh spec:', err);
+    }
+  }, [specId]);
+
+  // Git handlers
+  const handleCreateBranch = useCallback(async () => {
+    setGitError(null);
+    try {
+      const response = await fetch(`/api/specs/${specId}/git/branch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to create branch');
+      }
+      await refreshSpec();
+    } catch (err) {
+      setGitError(err instanceof Error ? err.message : 'Failed to create branch');
+      throw err;
+    }
+  }, [specId, refreshSpec]);
+
+  const handleCommitOnly = useCallback(async () => {
+    setGitError(null);
+    try {
+      const response = await fetch(`/api/specs/${specId}/git/commit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to create commit');
+      }
+    } catch (err) {
+      setGitError(err instanceof Error ? err.message : 'Failed to create commit');
+      throw err;
+    }
+  }, [specId]);
+
+  const handleCreatePR = useCallback(async () => {
+    setGitError(null);
+    try {
+      const response = await fetch(`/api/specs/${specId}/git/pr`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to create PR');
+      }
+      await refreshSpec();
+    } catch (err) {
+      setGitError(err instanceof Error ? err.message : 'Failed to create PR');
+      throw err;
+    }
+  }, [specId, refreshSpec]);
+
+  const handleMarkMerged = useCallback(async () => {
+    setGitError(null);
+    try {
+      const response = await fetch(`/api/specs/${specId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'merged' }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to update spec');
+      }
+      setSpec(data);
+    } catch (err) {
+      setGitError(err instanceof Error ? err.message : 'Failed to mark as merged');
+      throw err;
+    }
+  }, [specId]);
+
+  const handleSkipGit = useCallback(() => {
+    setShowCompletePanel(false);
+  }, []);
 
   if (isLoading) {
     return (
@@ -321,6 +430,40 @@ export default function SpecWorkspace() {
             <span className="text-neutral-500">/</span>
             <span className="text-neutral-100 truncate max-w-48">{spec.title}</span>
           </div>
+
+          {/* Git status indicators */}
+          {spec.branchName && (
+            <span className="flex items-center gap-1.5 text-xs text-neutral-500 font-mono bg-neutral-800/50 px-2 py-1 rounded">
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+              </svg>
+              {spec.branchName}
+            </span>
+          )}
+
+          {spec.prUrl && (
+            <a
+              href={spec.prUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 text-xs text-emerald-400 hover:text-emerald-300 font-mono bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/20 transition-colors"
+            >
+              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+              </svg>
+              PR #{spec.prNumber}
+            </a>
+          )}
+
+          {spec.status === 'merged' && (
+            <span className="flex items-center gap-1.5 text-xs text-violet-400 font-mono bg-violet-500/10 px-2 py-1 rounded border border-violet-500/20">
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+              merged
+            </span>
+          )}
+
           <div className="flex-1" />
           <Link
             href={`/project/${projectId}/spec/${specId}/edit`}
@@ -422,6 +565,16 @@ export default function SpecWorkspace() {
                 error={runAllState.error}
                 onStop={stopRunAll}
                 onClose={handleCloseRunAll}
+              />
+            ) : showCompletePanel || (showCompletionState && !spec.prUrl) ? (
+              <SpecCompletePanel
+                spec={spec}
+                project={project}
+                onCreatePR={handleCreatePR}
+                onCommitOnly={handleCommitOnly}
+                onSkip={handleSkipGit}
+                onMarkMerged={handleMarkMerged}
+                onCreateBranch={handleCreateBranch}
               />
             ) : (
               <ExecutionPanel
