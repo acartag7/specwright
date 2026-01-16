@@ -19,34 +19,11 @@ import type {
 
 const DEFAULT_MODEL = "claude-opus-4-5-20251101";
 const DEFAULT_TIMEOUT_MS = 300000; // 5 minutes
-// Try multiple possible paths for the claude CLI
-const CLAUDE_PATHS = [
-  process.env.CLAUDE_PATH,
-  "/opt/homebrew/bin/claude",
-  "/opt/homebrew/Caskroom/claude-code/2.1.7/claude",
-  "/usr/local/bin/claude",
-  "claude", // fallback to PATH
-].filter(Boolean) as string[];
 
-function findClaudePath(): string {
-  const { execSync } = require("child_process");
-  for (const p of CLAUDE_PATHS) {
-    try {
-      execSync(`test -x "${p}"`, { stdio: "ignore" });
-      return p;
-    } catch {
-      continue;
-    }
-  }
-  // Last resort: try which
-  try {
-    return execSync("which claude", { encoding: "utf-8" }).trim();
-  } catch {
-    return "claude";
-  }
-}
-
-const CLAUDE_PATH = findClaudePath();
+// Use CLAUDE_PATH env var if set, otherwise assume 'claude' is in PATH
+const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
+const CLAUDE_NOT_FOUND_ERROR =
+  "Claude CLI not found. Set CLAUDE_PATH environment variable or ensure 'claude' is in your PATH";
 
 export interface ClaudeClientOptions {
   model?: string;
@@ -213,10 +190,14 @@ export class ClaudeClient {
         }
       });
 
-      proc.on("error", (err) => {
+      proc.on("error", (err: NodeJS.ErrnoException) => {
         clearTimeout(timer);
         this.activeProcess = null;
-        reject(err);
+        if (err.code === "ENOENT") {
+          reject(new Error(CLAUDE_NOT_FOUND_ERROR));
+        } else {
+          reject(err);
+        }
       });
     });
   }
@@ -247,10 +228,21 @@ export class ClaudeClient {
 
     this.activeProcess = proc;
 
+    // Handle spawn errors (e.g., ENOENT when Claude CLI not found)
+    let spawnError: Error | null = null;
+    proc.on("error", (err: NodeJS.ErrnoException) => {
+      if (err.code === "ENOENT") {
+        spawnError = new Error(CLAUDE_NOT_FOUND_ERROR);
+      } else {
+        spawnError = err;
+      }
+    });
+
     const rl = createInterface({ input: proc.stdout! });
 
     try {
       for await (const line of rl) {
+        if (spawnError) throw spawnError;
         if (!line.trim()) continue;
 
         try {
@@ -260,6 +252,7 @@ export class ClaudeClient {
           // Ignore parse errors
         }
       }
+      if (spawnError) throw spawnError;
     } finally {
       this.activeProcess = null;
     }
