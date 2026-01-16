@@ -11,6 +11,7 @@ const STEPS: { step: SpecStudioStep; label: string }[] = [
   { step: 'intent', label: 'Intent' },
   { step: 'questions', label: 'Questions' },
   { step: 'review', label: 'Review' },
+  { step: 'config', label: 'Config' },
   { step: 'chunks', label: 'Chunks' },
 ];
 
@@ -18,8 +19,9 @@ const stepOrder: Record<SpecStudioStep, number> = {
   intent: 0,
   questions: 1,
   review: 2,
-  chunks: 3,
-  complete: 4,
+  config: 3,
+  chunks: 4,
+  complete: 5,
 };
 
 export default function StepIndicator({ currentStep, onStepClick }: StepIndicatorProps) {
@@ -28,7 +30,7 @@ export default function StepIndicator({ currentStep, onStepClick }: StepIndicato
   return (
     <div className="flex items-center gap-3">
       <span className="text-xs text-neutral-500 font-mono">
-        Step {Math.min(currentIndex + 1, 4)} of 4
+        Step {Math.min(currentIndex + 1, 5)} of 5
       </span>
       <div className="flex items-center gap-1.5">
         {STEPS.map((s, index) => {

@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS projects (
   name TEXT NOT NULL,
   directory TEXT NOT NULL,
   description TEXT,
+  config_json TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -288,4 +289,12 @@ export const MIGRATIONS_PHASE4_WORKERS = [
   `CREATE INDEX IF NOT EXISTS idx_workers_spec ON workers(spec_id)`,
   `CREATE INDEX IF NOT EXISTS idx_queue_priority ON worker_queue(priority DESC, added_at ASC)`,
   `CREATE INDEX IF NOT EXISTS idx_queue_spec ON worker_queue(spec_id)`,
+];
+
+/**
+ * Migration queries for Configuration System
+ * Adds config_json column to projects table
+ */
+export const MIGRATIONS_CONFIG_SYSTEM = [
+  `ALTER TABLE projects ADD COLUMN config_json TEXT`,
 ];

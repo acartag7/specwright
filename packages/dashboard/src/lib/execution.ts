@@ -5,7 +5,8 @@
  */
 
 import { OpencodeClient } from '@glm/mcp/client';
-import type { Project, Spec, Chunk, ChunkToolCall, ToolCallEvent, EventHandler } from '@glm/shared';
+import type { Project, Spec, Chunk, ChunkToolCall, ToolCallEvent, EventHandler, ProjectConfig } from '@glm/shared';
+import { DEFAULT_PROJECT_CONFIG } from '@glm/shared';
 import { getChunk, updateChunk, createToolCall, updateToolCall, getProject, getSpec, getChunksBySpec } from './db';
 import { buildPromptForChunk } from './prompt-builder';
 import { generateChunkSummary, generateQuickSummary } from './summary-generator';
@@ -209,18 +210,30 @@ export async function startChunkExecution(chunkId: string): Promise<{ success: b
     return { success: false, error: 'Project not found' };
   }
 
+  // Get project config or use defaults
+  const config: ProjectConfig = project.config ?? DEFAULT_PROJECT_CONFIG;
+
+  // Log config at execution start
+  console.log(`[Execution] Starting chunk: ${chunk.title}`);
+  console.log(`[Execution] Config: Executor=${config.executor.type}@${config.executor.endpoint || 'default'}, Model=${config.executor.model || 'default'}, MaxIterations=${config.maxIterations}`);
+
   // Build prompt with dependency context
   const prompt = await buildChunkPromptWithContext(spec, chunk);
 
-  // Create client
-  const client = new OpencodeClient();
+  // Create client with config
+  const client = new OpencodeClient({ baseUrl: config.executor.endpoint });
   const listeners = new Set<(event: ExecutionEvent) => void>();
 
   try {
-    // Check opencode health
-    const health = await client.checkHealth();
-    if (!health.healthy) {
-      return { success: false, error: 'OpenCode server is not available at http://localhost:4096. Make sure opencode is running.' };
+    // Check executor health based on config
+    if (config.executor.type === 'opencode') {
+      const health = await client.checkHealth();
+      if (!health.healthy) {
+        return { success: false, error: `OpenCode server is not available at ${config.executor.endpoint || 'http://localhost:4096'}. Make sure opencode is running.` };
+      }
+    } else if (config.executor.type === 'claude-code') {
+      // TODO: Implement Claude Code executor
+      return { success: false, error: 'Claude Code executor is not yet implemented.' };
     }
 
     // Create session
@@ -229,10 +242,10 @@ export async function startChunkExecution(chunkId: string): Promise<{ success: b
     // Update chunk status
     updateChunk(chunkId, { status: 'running' });
 
-    // Set up timeout
+    // Set up timeout from config
     const timeoutId = setTimeout(() => {
       handleTimeout(chunkId);
-    }, DEFAULT_TIMEOUT_MS);
+    }, config.executor.timeout || DEFAULT_TIMEOUT_MS);
 
     // Create event handler
     const eventHandler: EventHandler = {
@@ -296,12 +309,12 @@ export async function startChunkExecution(chunkId: string): Promise<{ success: b
       eventBuffer: [], // Buffer for late subscribers
     });
 
-    // Send prompt
+    // Send prompt with config
     await client.sendPrompt(session.id, project.directory, {
       parts: [{ type: 'text', text: prompt }],
       model: {
         providerID: 'zai-coding-plan',
-        modelID: 'glm-4.7',
+        modelID: config.executor.model || 'glm-4.7',
       },
     });
 
@@ -440,7 +453,7 @@ function handleToolCall(chunkId: string, toolCall: ToolCallEvent): void {
 
 // Helper: Handle timeout
 function handleTimeout(chunkId: string): void {
-  cleanup(chunkId, 'failed', 'Execution timed out after 5 minutes');
+  cleanup(chunkId, 'failed', 'Execution timed out');
 }
 
 // Helper: Handle error
@@ -506,6 +519,11 @@ function cleanup(chunkId: string, status: 'completed' | 'failed' | 'cancelled', 
 /**
  * Generate summary asynchronously after chunk completion
  * This runs in the background and updates the chunk when done
+ *
+ * TODO: Phase 5 (Ralph Loop) Integration:
+ * - Enforce maxIterations limit from config in iteration loop
+ * - Integrate reviewer based on config.reviewer.type
+ * - Pass reviewer config (type, cliPath, autoApprove) to review step
  */
 async function generateSummaryAsync(chunkId: string, workingDirectory: string): Promise<void> {
   try {

@@ -2,11 +2,13 @@
 
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import type { Spec, SpecStudioState, SpecStudioStep, Question, ChunkSuggestion } from '@glm/shared';
+import type { Spec, SpecStudioState, SpecStudioStep, Question, ChunkSuggestion, ProjectConfig } from '@glm/shared';
+import { DEFAULT_PROJECT_CONFIG } from '@glm/shared';
 import StepIndicator from './StepIndicator';
 import IntentStep from './IntentStep';
 import QuestionsStep from './QuestionsStep';
 import ReviewStep, { type ChunkDetailLevel } from './ReviewStep';
+import ConfigStep from './ConfigStep';
 import ChunksStep, { type GitOptions } from './ChunksStep';
 import ConfirmModal from '../ConfirmModal';
 
@@ -35,6 +37,9 @@ export default function SpecStudioWizard({
   const [error, setError] = useState<string | null>(null);
   const [showNavigationWarning, setShowNavigationWarning] = useState(false);
   const [pendingNavigationUrl, setPendingNavigationUrl] = useState<string | null>(null);
+  const [config, setConfig] = useState<ProjectConfig>(DEFAULT_PROJECT_CONFIG);
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const [accessibilityStatus, setAccessibilityStatus] = useState<any | null>(null);
 
   // Track the last saved state to detect unsaved changes
   const savedStateRef = useRef<SpecStudioState | null>(null);
@@ -83,6 +88,25 @@ export default function SpecStudioWizard({
 
     fetchState();
   }, [projectId, existingSpec]);
+
+  // Load project config on mount
+  useEffect(() => {
+    async function loadConfig() {
+      try {
+        const response = await fetch(`/api/projects/${projectId}/config?validate=true`);
+        if (!response.ok) {
+          throw new Error('Failed to fetch project config');
+        }
+        const data = await response.json();
+        setConfig(data.config);
+        setAccessibilityStatus(data.validation);
+      } catch (err) {
+        console.error('Error loading config:', err);
+      }
+    }
+
+    loadConfig();
+  }, [projectId]);
 
   // Warn on browser close/refresh if there are unsaved changes
   useEffect(() => {
@@ -256,6 +280,35 @@ export default function SpecStudioWizard({
       // Save spec first
       await saveState({ generatedSpec: studioState.generatedSpec });
 
+      // Save config before moving to next step
+      const configResponse = await fetch(`/api/projects/${projectId}/config?validate=true`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config),
+      });
+
+      if (!configResponse.ok) {
+        const configError = await configResponse.json();
+        if (configResponse.status === 400) {
+          setValidationError(configError.error);
+          await saveState({ step: 'config' });
+          return;
+        } else if (configResponse.status === 503) {
+          setAccessibilityStatus({
+            executor: { accessible: false, error: configError.error },
+            planner: { accessible: true },
+            reviewer: { accessible: true },
+          });
+        } else {
+          throw new Error('Failed to save config');
+        }
+      }
+
+      const configData = await configResponse.json();
+      if (configData.validation) {
+        setAccessibilityStatus(configData.validation);
+      }
+
       // Generate chunks from Opus
       const response = await fetch(`/api/projects/${projectId}/studio/chunks`, {
         method: 'POST',
@@ -277,7 +330,60 @@ export default function SpecStudioWizard({
     } finally {
       setIsGenerating(false);
     }
-  }, [projectId, studioState, saveState]);
+  }, [projectId, studioState, saveState, config]);
+
+  // Config step handlers
+  const handleConfigChange = useCallback((newConfig: ProjectConfig) => {
+    setConfig(newConfig);
+    setValidationError(null);
+  }, []);
+
+  const handleConfigBack = useCallback(async () => {
+    await goToStep('review');
+  }, [goToStep]);
+
+  const handleConfigNext = useCallback(async () => {
+    setIsGenerating(true);
+    try {
+      // Save config first
+      const response = await fetch(`/api/projects/${projectId}/config?validate=true`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config),
+      });
+
+      if (!response.ok) {
+        const configError = await response.json();
+        if (response.status === 400) {
+          setValidationError(configError.error);
+          return;
+        } else if (response.status === 503) {
+          setAccessibilityStatus({
+            executor: { accessible: false, error: configError.error },
+            planner: { accessible: true },
+            reviewer: { accessible: true },
+          });
+        } else {
+          throw new Error('Failed to save config');
+        }
+      }
+
+      const configData = await response.json();
+      if (configData.validation) {
+        setAccessibilityStatus(configData.validation);
+      }
+
+      await saveState({ step: 'chunks' });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save config');
+    } finally {
+      setIsGenerating(false);
+    }
+  }, [projectId, config, saveState]);
+
+  const handleChunksBack = useCallback(async () => {
+    await goToStep('config');
+  }, [goToStep]);
 
   // Chunks step handlers
   const handleChunksChange = useCallback((chunks: ChunkSuggestion[]) => {
@@ -306,10 +412,6 @@ export default function SpecStudioWizard({
     setPendingNavigationUrl(null);
   }, []);
 
-  const handleChunksBack = useCallback(async () => {
-    await goToStep('review');
-  }, [goToStep]);
-
   const handleComplete = useCallback(async (gitOptions: GitOptions) => {
     if (!studioState) return;
 
@@ -317,6 +419,13 @@ export default function SpecStudioWizard({
     try {
       // Save chunks first
       await saveState({ suggestedChunks: studioState.suggestedChunks });
+
+      // Save config
+      await fetch(`/api/projects/${projectId}/config`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config),
+      });
 
       // Complete: save spec and create chunks
       // Use spec-specific endpoint if specId is provided
@@ -467,6 +576,17 @@ export default function SpecStudioWizard({
                   onNext={handleReviewNext}
                   onRefine={handleRefine}
                   isRefining={isGenerating}
+                />
+              )}
+
+              {studioState.step === 'config' && (
+                <ConfigStep
+                  config={config}
+                  onChange={handleConfigChange}
+                  onBack={handleConfigBack}
+                  onNext={handleConfigNext}
+                  validationError={validationError}
+                  accessibilityStatus={accessibilityStatus}
                 />
               )}
 

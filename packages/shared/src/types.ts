@@ -6,11 +6,14 @@
 // MVP Data Model Types
 // ============================================================================
 
+import type { ProjectConfig } from "./config.js";
+
 export interface Project {
   id: string;
   name: string;
   directory: string;
   description?: string;
+  config?: ProjectConfig;
   createdAt: number;
   updatedAt: number;
 }
@@ -450,7 +453,7 @@ export interface SpecStudioState {
   updatedAt: number;
 }
 
-export type SpecStudioStep = 'intent' | 'questions' | 'review' | 'chunks' | 'complete';
+export type SpecStudioStep = 'intent' | 'questions' | 'review' | 'config' | 'chunks' | 'complete';
 
 export interface Question {
   id: string;
