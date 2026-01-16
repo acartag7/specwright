@@ -1,13 +1,14 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
-import Link from 'next/link';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import type { Spec, SpecStudioState, SpecStudioStep, Question, ChunkSuggestion } from '@glm/shared';
 import StepIndicator from './StepIndicator';
 import IntentStep from './IntentStep';
 import QuestionsStep from './QuestionsStep';
 import ReviewStep, { type ChunkDetailLevel } from './ReviewStep';
 import ChunksStep, { type GitOptions } from './ChunksStep';
+import ConfirmModal from '../ConfirmModal';
 
 interface SpecStudioWizardProps {
   projectId: string;
@@ -26,11 +27,33 @@ export default function SpecStudioWizard({
   existingSpec,
   onComplete,
 }: SpecStudioWizardProps) {
+  const router = useRouter();
   const [studioState, setStudioState] = useState<SpecStudioState | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showNavigationWarning, setShowNavigationWarning] = useState(false);
+  const [pendingNavigationUrl, setPendingNavigationUrl] = useState<string | null>(null);
+
+  // Track the last saved state to detect unsaved changes
+  const savedStateRef = useRef<SpecStudioState | null>(null);
+
+  // Compute whether there are unsaved changes
+  const hasUnsavedChanges = useMemo(() => {
+    if (!studioState || !savedStateRef.current) return false;
+
+    const saved = savedStateRef.current;
+
+    // Compare relevant fields that indicate user work
+    const intentChanged = studioState.intent !== saved.intent && studioState.intent.trim() !== '';
+    const answersChanged = JSON.stringify(studioState.answers) !== JSON.stringify(saved.answers) &&
+                          Object.keys(studioState.answers).length > 0;
+    const specChanged = studioState.generatedSpec !== saved.generatedSpec && studioState.generatedSpec.trim() !== '';
+    const chunksChanged = JSON.stringify(studioState.suggestedChunks) !== JSON.stringify(saved.suggestedChunks);
+
+    return intentChanged || answersChanged || specChanged || chunksChanged;
+  }, [studioState]);
 
   // Fetch or create studio state on mount
   useEffect(() => {
@@ -49,6 +72,8 @@ export default function SpecStudioWizard({
         }
 
         setStudioState(state);
+        // Track the initial saved state
+        savedStateRef.current = JSON.parse(JSON.stringify(state));
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Unknown error');
       } finally {
@@ -58,6 +83,21 @@ export default function SpecStudioWizard({
 
     fetchState();
   }, [projectId, existingSpec]);
+
+  // Warn on browser close/refresh if there are unsaved changes
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasUnsavedChanges) {
+        e.preventDefault();
+        // Modern browsers ignore custom messages, but this is still required
+        e.returnValue = '';
+        return '';
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasUnsavedChanges]);
 
   // Save state to API
   const saveState = useCallback(async (updates: Partial<SpecStudioState>) => {
@@ -77,6 +117,8 @@ export default function SpecStudioWizard({
 
       const updatedState = await response.json();
       setStudioState(updatedState);
+      // Update the saved state reference after successful save
+      savedStateRef.current = JSON.parse(JSON.stringify(updatedState));
       return updatedState;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save');
@@ -242,6 +284,28 @@ export default function SpecStudioWizard({
     setStudioState(prev => prev ? { ...prev, suggestedChunks: chunks } : null);
   }, []);
 
+  // Navigation handlers for unsaved changes warning
+  const handleNavigationAttempt = useCallback((url: string) => {
+    if (hasUnsavedChanges) {
+      setPendingNavigationUrl(url);
+      setShowNavigationWarning(true);
+    } else {
+      router.push(url);
+    }
+  }, [hasUnsavedChanges, router]);
+
+  const handleConfirmNavigation = useCallback(() => {
+    setShowNavigationWarning(false);
+    if (pendingNavigationUrl) {
+      router.push(pendingNavigationUrl);
+    }
+  }, [pendingNavigationUrl, router]);
+
+  const handleCancelNavigation = useCallback(() => {
+    setShowNavigationWarning(false);
+    setPendingNavigationUrl(null);
+  }, []);
+
   const handleChunksBack = useCallback(async () => {
     await goToStep('review');
   }, [goToStep]);
@@ -302,9 +366,12 @@ export default function SpecStudioWizard({
       <div className="min-h-screen bg-neutral-950 flex items-center justify-center bg-[linear-gradient(rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:64px_64px]">
         <div className="text-center">
           <h2 className="text-xl font-medium text-neutral-100 mb-2 font-mono">{error}</h2>
-          <Link href="/" className="text-emerald-400 hover:text-emerald-300 text-sm font-mono">
+          <button
+            onClick={() => router.push('/')}
+            className="text-emerald-400 hover:text-emerald-300 text-sm font-mono"
+          >
             Back to projects
-          </Link>
+          </button>
         </div>
       </div>
     );
@@ -317,15 +384,15 @@ export default function SpecStudioWizard({
       {/* Header */}
       <header className="border-b border-neutral-800/80 bg-neutral-950/90 backdrop-blur-sm sticky top-0 z-10">
         <div className="px-6 py-3 flex items-center gap-4">
-          <Link
-            href="/"
+          <button
+            onClick={() => handleNavigationAttempt('/')}
             className="p-1.5 text-neutral-500 hover:text-neutral-300 hover:bg-neutral-800 rounded-md transition-colors"
             title="Back to projects"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
             </svg>
-          </Link>
+          </button>
           <div className="flex items-center gap-2 text-sm font-mono">
             <span className="text-neutral-500">/</span>
             <span className="text-neutral-400">project</span>
@@ -416,6 +483,19 @@ export default function SpecStudioWizard({
           </div>
         </div>
       </div>
+
+      {/* Navigation Warning Modal */}
+      {showNavigationWarning && (
+        <ConfirmModal
+          title="Unsaved Changes"
+          message="You have unsaved changes in the spec wizard. Are you sure you want to leave? Your progress will be lost."
+          confirmLabel="Leave"
+          cancelLabel="Stay"
+          onConfirm={handleConfirmNavigation}
+          onCancel={handleCancelNavigation}
+          isDanger
+        />
+      )}
     </div>
   );
 }
