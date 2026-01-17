@@ -28,6 +28,7 @@ export interface Spec {
   version: number;
   status: SpecStatus;
   branchName?: string;
+  originalBranch?: string;
   prNumber?: number;
   prUrl?: string;
   createdAt: number;
@@ -51,6 +52,8 @@ export interface Chunk {
   reviewFeedback?: string;
   // Dependencies (Phase 3)
   dependencies: string[];  // IDs of chunks this depends on
+  // Git integration (ORC-21)
+  commitHash?: string;
 }
 
 // Graph visualization types (Phase 3)
@@ -134,6 +137,7 @@ export interface UpdateSpecRequest {
   content?: string;
   status?: SpecStatus;
   branchName?: string;
+  originalBranch?: string;
   prNumber?: number;
   prUrl?: string;
 }

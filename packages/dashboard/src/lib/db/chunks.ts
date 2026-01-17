@@ -16,6 +16,7 @@ interface ChunkRow {
   review_status: string | null;
   review_feedback: string | null;
   dependencies: string | null;
+  commit_hash: string | null;
 }
 
 function rowToChunk(row: ChunkRow): Chunk {
@@ -41,6 +42,7 @@ function rowToChunk(row: ChunkRow): Chunk {
     reviewStatus: (row.review_status as ReviewStatus) ?? undefined,
     reviewFeedback: row.review_feedback ?? undefined,
     dependencies,
+    commitHash: row.commit_hash ?? undefined,
   };
 }
 
@@ -102,6 +104,7 @@ export function updateChunk(id: string, data: {
   reviewStatus?: ReviewStatus;
   reviewFeedback?: string;
   dependencies?: string[];
+  commitHash?: string;
 }): Chunk | null {
   const database = getDb();
   const existing = getChunk(id);
@@ -112,7 +115,7 @@ export function updateChunk(id: string, data: {
     SET title = ?, description = ?, "order" = ?, status = ?, output = ?, output_summary = ?, error = ?,
         started_at = CASE WHEN ? = 'running' AND started_at IS NULL THEN ? ELSE started_at END,
         completed_at = CASE WHEN ? IN ('completed', 'failed') AND completed_at IS NULL THEN ? ELSE completed_at END,
-        review_status = ?, review_feedback = ?, dependencies = ?
+        review_status = ?, review_feedback = ?, dependencies = ?, commit_hash = ?
     WHERE id = ?
   `);
 
@@ -133,6 +136,7 @@ export function updateChunk(id: string, data: {
     data.reviewStatus ?? existing.reviewStatus ?? null,
     data.reviewFeedback ?? existing.reviewFeedback ?? null,
     JSON.stringify(newDependencies),
+    data.commitHash ?? existing.commitHash ?? null,
     id
   );
 

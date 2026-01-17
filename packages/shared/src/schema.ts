@@ -450,3 +450,12 @@ export const MIGRATIONS_CASCADE_DELETE = [
   `CREATE INDEX IF NOT EXISTS idx_queue_priority ON worker_queue(priority DESC, added_at ASC)`,
   `CREATE INDEX IF NOT EXISTS idx_queue_spec ON worker_queue(spec_id)`,
 ];
+
+/**
+ * Migration queries for Git Integration (ORC-21)
+ * Adds original_branch column to specs table and commit_hash column to chunks table
+ */
+export const MIGRATIONS_GIT_INTEGRATION = [
+  `ALTER TABLE specs ADD COLUMN original_branch TEXT`,
+  `ALTER TABLE chunks ADD COLUMN commit_hash TEXT`,
+];

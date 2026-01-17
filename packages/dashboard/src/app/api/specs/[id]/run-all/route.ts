@@ -5,7 +5,7 @@
  * Returns SSE stream with execution events for all chunks
  */
 
-import { getSpec, getChunksBySpec, updateSpec, updateChunk, insertFixChunk, getChunk } from '@/lib/db';
+import { getSpec, getChunksBySpec, updateSpec, updateChunk, insertFixChunk, getChunk, getProject } from '@/lib/db';
 import {
   startChunkExecution,
   waitForChunkCompletion,
@@ -16,6 +16,18 @@ import {
   hasActiveRunAllSession,
 } from '@/lib/execution';
 import { buildReviewPrompt, parseReviewResult } from '@/lib/prompts';
+import {
+  checkGitRepo,
+  getCurrentBranch,
+  createBranch,
+  checkoutBranch,
+  createCommit,
+  resetHard,
+  pushBranch,
+  createPullRequest,
+  generateSpecBranchName,
+  checkGitHubCLI,
+} from '@/lib/git';
 import { ClaudeClient } from '@specwright/mcp/client';
 import type { ChunkToolCall, Chunk, ReviewResult } from '@specwright/shared';
 
@@ -128,6 +140,50 @@ export async function POST(_request: Request, context: RouteContext) {
       let fixes = 0;
       const total = pendingChunks.length;
       let currentIndex = 0;
+
+      // Git workflow state
+      let gitEnabled = false;
+      let originalBranch: string | null = null;
+      let specBranch: string | null = null;
+      let projectDir: string | null = null;
+
+      // Initialize git workflow
+      const project = getProject(spec.projectId);
+      if (project) {
+        projectDir = project.directory;
+        if (checkGitRepo(projectDir)) {
+          gitEnabled = true;
+          originalBranch = getCurrentBranch(projectDir);
+          specBranch = generateSpecBranchName(spec.title);
+
+          // Try to create and checkout the spec branch
+          const branchResult = await createBranch(projectDir, specBranch, originalBranch || undefined);
+          if (branchResult.success) {
+            // Store branch info in spec
+            updateSpec(specId, { branchName: specBranch, originalBranch: originalBranch || undefined });
+            sendEvent(controller, encoder, isClosedRef, 'git_branch_created', {
+              branch: specBranch,
+              originalBranch,
+            });
+          } else if (branchResult.error?.type === 'branch_exists') {
+            // Branch already exists, try to switch to it
+            if (checkoutBranch(projectDir, specBranch)) {
+              updateSpec(specId, { branchName: specBranch, originalBranch: originalBranch || undefined });
+              sendEvent(controller, encoder, isClosedRef, 'git_branch_switched', {
+                branch: specBranch,
+              });
+            } else {
+              // Can't switch to branch, disable git workflow
+              console.warn('[Git] Failed to switch to existing branch:', specBranch);
+              gitEnabled = false;
+            }
+          } else {
+            // Branch creation failed for another reason, disable git workflow
+            console.warn('[Git] Failed to create branch:', branchResult.error?.message);
+            gitEnabled = false;
+          }
+        }
+      }
 
       // Helper to run a single chunk (original or fix)
       async function runChunk(
@@ -327,6 +383,14 @@ export async function POST(_request: Request, context: RouteContext) {
             runningIds.delete(chunk.id);
 
             if (!result.success) {
+              // Git: Reset to discard failed changes
+              if (gitEnabled && projectDir) {
+                resetHard(projectDir);
+                sendEvent(controller, encoder, isClosedRef, 'git_reset', {
+                  chunkId: chunk.id,
+                  reason: 'Chunk execution failed',
+                });
+              }
               if (isRunAllAborted(specId)) {
                 stopReason = 'Aborted by user';
               } else {
@@ -341,6 +405,18 @@ export async function POST(_request: Request, context: RouteContext) {
             // Handle review result
             if (result.reviewResult) {
               if (result.reviewResult.status === 'pass') {
+                // Git: Commit the successful chunk
+                if (gitEnabled && projectDir) {
+                  const commitResult = await createCommit(projectDir, `chunk ${currentIndex}: ${chunk.title}`);
+                  if (commitResult.success && commitResult.commitHash) {
+                    updateChunk(chunk.id, { commitHash: commitResult.commitHash });
+                    sendEvent(controller, encoder, isClosedRef, 'git_commit', {
+                      chunkId: chunk.id,
+                      commitHash: commitResult.commitHash,
+                      filesChanged: commitResult.filesChanged,
+                    });
+                  }
+                }
                 completedIds.add(chunk.id);
                 passed++;
               } else if (result.reviewResult.status === 'needs_fix' && result.fixChunkId) {
@@ -351,6 +427,14 @@ export async function POST(_request: Request, context: RouteContext) {
                   const fixResult = await runChunk(result.fixChunkId, fixChunk.title, currentIndex, true);
 
                   if (!fixResult.success) {
+                    // Git: Reset to discard failed fix changes
+                    if (gitEnabled && projectDir) {
+                      resetHard(projectDir);
+                      sendEvent(controller, encoder, isClosedRef, 'git_reset', {
+                        chunkId: result.fixChunkId,
+                        reason: 'Fix chunk execution failed',
+                      });
+                    }
                     if (isRunAllAborted(specId)) {
                       stopReason = 'Aborted by user';
                     } else {
@@ -364,10 +448,30 @@ export async function POST(_request: Request, context: RouteContext) {
 
                   // Check fix chunk review
                   if (fixResult.reviewResult?.status === 'pass') {
+                    // Git: Commit the successful fix chunk
+                    if (gitEnabled && projectDir) {
+                      const commitResult = await createCommit(projectDir, `fix: ${fixChunk.title}`);
+                      if (commitResult.success && commitResult.commitHash) {
+                        updateChunk(result.fixChunkId, { commitHash: commitResult.commitHash });
+                        sendEvent(controller, encoder, isClosedRef, 'git_commit', {
+                          chunkId: result.fixChunkId,
+                          commitHash: commitResult.commitHash,
+                          filesChanged: commitResult.filesChanged,
+                        });
+                      }
+                    }
                     completedIds.add(chunk.id);
                     completedIds.add(result.fixChunkId);
                     passed++;
                   } else if (fixResult.reviewResult?.status === 'fail') {
+                    // Git: Reset to discard failed fix work
+                    if (gitEnabled && projectDir) {
+                      resetHard(projectDir);
+                      sendEvent(controller, encoder, isClosedRef, 'git_reset', {
+                        chunkId: result.fixChunkId,
+                        reason: 'Fix chunk review failed',
+                      });
+                    }
                     failedIds.add(chunk.id);
                     failed++;
                     hasFailure = true;
@@ -380,6 +484,14 @@ export async function POST(_request: Request, context: RouteContext) {
                   }
                 }
               } else if (result.reviewResult.status === 'fail') {
+                // Git: Reset to discard failed chunk work
+                if (gitEnabled && projectDir) {
+                  resetHard(projectDir);
+                  sendEvent(controller, encoder, isClosedRef, 'git_reset', {
+                    chunkId: chunk.id,
+                    reason: 'Chunk review failed',
+                  });
+                }
                 failedIds.add(chunk.id);
                 failed++;
                 hasFailure = true;
@@ -395,9 +507,55 @@ export async function POST(_request: Request, context: RouteContext) {
         }
 
         // Check if all completed successfully
+        let prUrl: string | undefined;
         if (!isRunAllAborted(specId) && failed === 0) {
           // Update spec status to completed
           updateSpec(specId, { status: 'completed' });
+
+          // Git: Push branch and create PR
+          if (gitEnabled && projectDir && specBranch && originalBranch) {
+            // Check if gh CLI is available
+            const ghCheck = checkGitHubCLI();
+            if (ghCheck.installed && ghCheck.authenticated) {
+              // Push branch to remote
+              const pushResult = await pushBranch(projectDir, specBranch);
+              if (pushResult.success) {
+                sendEvent(controller, encoder, isClosedRef, 'git_push', {
+                  branch: specBranch,
+                });
+
+                // Create PR
+                const prBody = `Automated PR for spec execution.\n\n**${passed} chunks** completed successfully.\n\n## Spec: ${spec.title}`;
+                const prResult = await createPullRequest(
+                  projectDir,
+                  `Spec: ${spec.title}`,
+                  prBody,
+                  originalBranch
+                );
+
+                if (prResult.success && prResult.prUrl) {
+                  prUrl = prResult.prUrl;
+                  updateSpec(specId, { prUrl: prResult.prUrl, prNumber: prResult.prNumber });
+                  sendEvent(controller, encoder, isClosedRef, 'pr_created', {
+                    url: prResult.prUrl,
+                    number: prResult.prNumber,
+                  });
+                } else {
+                  sendEvent(controller, encoder, isClosedRef, 'pr_creation_failed', {
+                    message: prResult.error || 'Failed to create PR',
+                  });
+                }
+              } else {
+                sendEvent(controller, encoder, isClosedRef, 'git_push_failed', {
+                  message: pushResult.error || 'Failed to push branch',
+                });
+              }
+            } else {
+              sendEvent(controller, encoder, isClosedRef, 'git_push_skipped', {
+                message: ghCheck.error || 'GitHub CLI not available',
+              });
+            }
+          }
         } else {
           // Keep as running or set to review for manual intervention
           updateSpec(specId, { status: 'review' });
@@ -409,12 +567,17 @@ export async function POST(_request: Request, context: RouteContext) {
           passed,
           failed,
           fixes,
+          prUrl,
         });
       } catch (error) {
         sendEvent(controller, encoder, isClosedRef, 'error', {
           message: error instanceof Error ? error.message : 'Unknown error',
         });
       } finally {
+        // Git: Always switch back to original branch
+        if (gitEnabled && projectDir && originalBranch) {
+          checkoutBranch(projectDir, originalBranch);
+        }
         endRunAllSession(specId);
         controller.close();
       }

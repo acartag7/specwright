@@ -9,6 +9,7 @@ interface SpecRow {
   version: number;
   status: string | null;
   branch_name: string | null;
+  original_branch: string | null;
   pr_number: number | null;
   pr_url: string | null;
   created_at: number;
@@ -24,6 +25,7 @@ function rowToSpec(row: SpecRow): Spec {
     version: row.version,
     status: (row.status as SpecStatus) || 'draft',
     branchName: row.branch_name ?? undefined,
+    originalBranch: row.original_branch ?? undefined,
     prNumber: row.pr_number ?? undefined,
     prUrl: row.pr_url ?? undefined,
     createdAt: row.created_at,
@@ -91,6 +93,7 @@ export function updateSpec(
     content?: string;
     status?: SpecStatus;
     branchName?: string;
+    originalBranch?: string;
     prNumber?: number;
     prUrl?: string;
   }
@@ -103,7 +106,7 @@ export function updateSpec(
   const now = Date.now();
   const updateStmt = database.prepare(`
     UPDATE specs
-    SET title = ?, content = ?, status = ?, branch_name = ?, pr_number = ?, pr_url = ?, version = version + 1, updated_at = ?
+    SET title = ?, content = ?, status = ?, branch_name = ?, original_branch = ?, pr_number = ?, pr_url = ?, version = version + 1, updated_at = ?
     WHERE id = ?
   `);
   updateStmt.run(
@@ -111,6 +114,7 @@ export function updateSpec(
     data.content ?? existing.content,
     data.status ?? existing.status ?? 'draft',
     data.branchName ?? existing.branch_name,
+    data.originalBranch ?? existing.original_branch,
     data.prNumber ?? existing.pr_number,
     data.prUrl ?? existing.pr_url,
     now,

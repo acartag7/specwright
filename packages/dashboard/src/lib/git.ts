@@ -477,3 +477,35 @@ export function getChangedFilesCount(directory: string, baseBranch: string = 'ma
     return 0;
   }
 }
+
+/**
+ * Reset working directory to HEAD, discarding all uncommitted changes
+ */
+export function resetHard(directory: string): { success: boolean; error?: string } {
+  const result = gitSync(['reset', '--hard', 'HEAD'], directory);
+  if (result.status !== 0) {
+    return { success: false, error: result.stderr };
+  }
+  return { success: true };
+}
+
+/**
+ * Check if there are uncommitted changes in the working directory
+ */
+export function hasUncommittedChanges(directory: string): boolean {
+  const result = gitSync(['status', '--porcelain'], directory);
+  return result.stdout.trim().length > 0;
+}
+
+/**
+ * Generate a branch name slug from spec title
+ * Returns: spec/{slug} (max 50 chars total)
+ */
+export function generateSpecBranchName(specTitle: string): string {
+  const slug = specTitle
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 44); // Leave room for "spec/" prefix
+  return `spec/${slug}`;
+}
