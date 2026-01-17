@@ -46,6 +46,9 @@ export function getDb(): DatabaseType {
   // Run Cascade Delete migrations (ORC-31)
   runCascadeDeleteMigrations(db);
 
+  // Run Spec Studio State migrations (ORC-46)
+  runSpecStudioStateMigrations(db);
+
   return db;
 }
 
@@ -239,6 +242,81 @@ function runCascadeDeleteMigrations(database: DatabaseType): void {
     // Ensure FK enforcement is re-enabled even on error
     database.exec('PRAGMA foreign_keys = ON');
     // Don't throw - allow the app to continue with existing schema
+  }
+}
+
+function runSpecStudioStateMigrations(database: DatabaseType): void {
+  // Check if we need to recreate the table to fix the UNIQUE constraint
+  // Old schema had UNIQUE(project_id), new schema needs UNIQUE(project_id, spec_id)
+  const indexInfo = database.prepare(`PRAGMA index_list(spec_studio_state)`).all() as { name: string; unique: number }[];
+  const tableInfo = database.prepare(`PRAGMA table_info(spec_studio_state)`).all() as { name: string }[];
+  const hasSpecIdColumn = tableInfo.some(col => col.name === 'spec_id');
+
+  // Check if there's a unique index on just project_id (the old constraint)
+  let needsRecreate = false;
+  for (const idx of indexInfo) {
+    if (idx.unique) {
+      const cols = database.prepare(`PRAGMA index_info("${idx.name}")`).all() as { name: string }[];
+      // If there's a unique index with only project_id, we need to recreate
+      if (cols.length === 1 && cols[0].name === 'project_id') {
+        needsRecreate = true;
+        break;
+      }
+    }
+  }
+
+  if (needsRecreate) {
+    console.log('Recreating spec_studio_state table to fix unique constraint (ORC-46)...');
+    database.exec('PRAGMA foreign_keys = OFF');
+    try {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS spec_studio_state_new (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          spec_id TEXT,
+          step TEXT NOT NULL DEFAULT 'intent',
+          intent TEXT DEFAULT '',
+          questions TEXT DEFAULT '[]',
+          answers TEXT DEFAULT '{}',
+          generated_spec TEXT DEFAULT '',
+          suggested_chunks TEXT DEFAULT '[]',
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+          FOREIGN KEY (spec_id) REFERENCES specs(id) ON DELETE CASCADE,
+          UNIQUE(project_id, spec_id)
+        )
+      `);
+      // Copy data, setting spec_id to NULL for existing rows
+      database.exec(`
+        INSERT INTO spec_studio_state_new (id, project_id, spec_id, step, intent, questions, answers, generated_spec, suggested_chunks, created_at, updated_at)
+        SELECT id, project_id, ${hasSpecIdColumn ? 'spec_id' : 'NULL'}, step, intent, questions, answers, generated_spec, suggested_chunks, created_at, updated_at
+        FROM spec_studio_state WHERE project_id IN (SELECT id FROM projects)
+      `);
+      database.exec(`DROP TABLE spec_studio_state`);
+      database.exec(`ALTER TABLE spec_studio_state_new RENAME TO spec_studio_state`);
+      console.log('spec_studio_state table recreated successfully');
+    } finally {
+      database.exec('PRAGMA foreign_keys = ON');
+    }
+  } else if (!hasSpecIdColumn) {
+    // Just add the spec_id column if table already has correct constraint structure
+    try {
+      database.exec(`ALTER TABLE spec_studio_state ADD COLUMN spec_id TEXT REFERENCES specs(id) ON DELETE CASCADE`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!message.includes('duplicate column')) {
+        console.warn(`Migration warning: ${message}`);
+      }
+    }
+  }
+
+  // Always try to create indexes (IF NOT EXISTS makes it safe for all cases)
+  try {
+    database.exec(`CREATE INDEX IF NOT EXISTS idx_studio_project ON spec_studio_state(project_id)`);
+    database.exec(`CREATE INDEX IF NOT EXISTS idx_studio_spec ON spec_studio_state(spec_id)`);
+  } catch (err) {
+    console.warn(`Index creation warning: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 

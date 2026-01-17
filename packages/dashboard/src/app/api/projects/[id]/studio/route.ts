@@ -7,9 +7,13 @@ interface RouteContext {
 }
 
 // GET /api/projects/[id]/studio - Get studio state (creates if not exists)
-export async function GET(_request: Request, context: RouteContext) {
+// Optional query param: specId - if provided, gets/creates state for that specific spec
+export async function GET(request: Request, context: RouteContext) {
   try {
     const { id } = await context.params;
+    const { searchParams } = new URL(request.url);
+    const specId = searchParams.get('specId') || undefined;
+
     const project = getProject(id);
 
     if (!project) {
@@ -20,9 +24,9 @@ export async function GET(_request: Request, context: RouteContext) {
     }
 
     // Get existing state or create new one
-    let state = getStudioState(id);
+    let state = getStudioState(id, specId);
     if (!state) {
-      state = createStudioState(id);
+      state = createStudioState(id, specId);
     }
 
     return NextResponse.json(state);
@@ -36,9 +40,13 @@ export async function GET(_request: Request, context: RouteContext) {
 }
 
 // PUT /api/projects/[id]/studio - Update studio state
+// Optional query param: specId - if provided, updates state for that specific spec
 export async function PUT(request: Request, context: RouteContext) {
   try {
     const { id } = await context.params;
+    const { searchParams } = new URL(request.url);
+    const specId = searchParams.get('specId') || undefined;
+
     const project = getProject(id);
 
     if (!project) {
@@ -51,9 +59,9 @@ export async function PUT(request: Request, context: RouteContext) {
     const body = await request.json() as UpdateStudioStateRequest;
 
     // Ensure state exists
-    let state = getStudioState(id);
+    let state = getStudioState(id, specId);
     if (!state) {
-      state = createStudioState(id);
+      state = createStudioState(id, specId);
     }
 
     // Update state
@@ -64,7 +72,7 @@ export async function PUT(request: Request, context: RouteContext) {
       answers: body.answers,
       generatedSpec: body.generatedSpec,
       suggestedChunks: body.suggestedChunks,
-    });
+    }, specId);
 
     if (!updatedState) {
       return NextResponse.json(

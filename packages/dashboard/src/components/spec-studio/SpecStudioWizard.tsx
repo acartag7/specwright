@@ -60,12 +60,20 @@ export default function SpecStudioWizard({
     return intentChanged || answersChanged || specChanged || chunksChanged;
   }, [studioState]);
 
+  // Build API URL with optional specId
+  const buildStudioUrl = useCallback((base: string) => {
+    if (!specId) return base;
+    const separator = base.includes('?') ? '&' : '?';
+    return `${base}${separator}specId=${encodeURIComponent(specId)}`;
+  }, [specId]);
+
   // Fetch or create studio state on mount
   useEffect(() => {
     async function fetchState() {
       try {
         setIsLoading(true);
-        const response = await fetch(`/api/projects/${projectId}/studio`);
+        const url = buildStudioUrl(`/api/projects/${projectId}/studio`);
+        const response = await fetch(url);
         if (!response.ok) {
           throw new Error('Failed to fetch studio state');
         }
@@ -87,7 +95,7 @@ export default function SpecStudioWizard({
     }
 
     fetchState();
-  }, [projectId, existingSpec]);
+  }, [projectId, specId, existingSpec, buildStudioUrl]);
 
   // Load project config on mount
   useEffect(() => {
@@ -129,7 +137,8 @@ export default function SpecStudioWizard({
 
     setIsSaving(true);
     try {
-      const response = await fetch(`/api/projects/${projectId}/studio`, {
+      const url = buildStudioUrl(`/api/projects/${projectId}/studio`);
+      const response = await fetch(url, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates),
@@ -150,7 +159,7 @@ export default function SpecStudioWizard({
     } finally {
       setIsSaving(false);
     }
-  }, [projectId, studioState]);
+  }, [projectId, studioState, buildStudioUrl]);
 
   // Step navigation
   const goToStep = useCallback(async (step: SpecStudioStep) => {

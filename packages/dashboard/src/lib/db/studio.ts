@@ -4,6 +4,7 @@ import { getDb, generateId } from './connection';
 interface StudioStateRow {
   id: string;
   project_id: string;
+  spec_id: string | null;
   step: string;
   intent: string;
   questions: string;
@@ -38,6 +39,7 @@ function rowToStudioState(row: StudioStateRow): SpecStudioState {
   return {
     id: row.id,
     projectId: row.project_id,
+    specId: row.spec_id || undefined,
     step: row.step as SpecStudioStep,
     intent: row.intent,
     questions,
@@ -49,27 +51,39 @@ function rowToStudioState(row: StudioStateRow): SpecStudioState {
   };
 }
 
-export function getStudioState(projectId: string): SpecStudioState | null {
+export function getStudioState(projectId: string, specId?: string): SpecStudioState | null {
   const database = getDb();
-  const stmt = database.prepare(`SELECT * FROM spec_studio_state WHERE project_id = ?`);
-  const row = stmt.get(projectId) as StudioStateRow | undefined;
+  const stmt = database.prepare(`
+    SELECT * FROM spec_studio_state
+    WHERE project_id = ? AND (spec_id = ? OR (spec_id IS NULL AND ? IS NULL))
+    ORDER BY created_at DESC LIMIT 1
+  `);
+  const row = stmt.get(projectId, specId ?? null, specId ?? null) as StudioStateRow | undefined;
   return row ? rowToStudioState(row) : null;
 }
 
-export function createStudioState(projectId: string): SpecStudioState {
+export function createStudioState(projectId: string, specId?: string): SpecStudioState {
   const database = getDb();
   const id = generateId();
   const now = Date.now();
 
+  // Use INSERT OR IGNORE to handle race conditions where two requests
+  // try to create the same state simultaneously
   const stmt = database.prepare(`
-    INSERT INTO spec_studio_state (id, project_id, step, intent, questions, answers, generated_spec, suggested_chunks, created_at, updated_at)
-    VALUES (?, ?, 'intent', '', '[]', '{}', '', '[]', ?, ?)
+    INSERT OR IGNORE INTO spec_studio_state (id, project_id, spec_id, step, intent, questions, answers, generated_spec, suggested_chunks, created_at, updated_at)
+    VALUES (?, ?, ?, 'intent', '', '[]', '{}', '', '[]', ?, ?)
   `);
-  stmt.run(id, projectId, now, now);
+  stmt.run(id, projectId, specId ?? null, now, now);
 
+  // Return the existing or newly created state
+  const existing = getStudioState(projectId, specId);
+  if (existing) return existing;
+
+  // Fallback (should rarely happen)
   return {
     id,
     projectId,
+    specId,
     step: 'intent',
     intent: '',
     questions: [],
@@ -90,17 +104,18 @@ export function updateStudioState(
     answers?: Record<string, string | string[]>;
     generatedSpec?: string;
     suggestedChunks?: ChunkSuggestion[];
-  }
+  },
+  specId?: string
 ): SpecStudioState | null {
   const database = getDb();
-  const existing = getStudioState(projectId);
+  const existing = getStudioState(projectId, specId);
   if (!existing) return null;
 
   const now = Date.now();
   const stmt = database.prepare(`
     UPDATE spec_studio_state
     SET step = ?, intent = ?, questions = ?, answers = ?, generated_spec = ?, suggested_chunks = ?, updated_at = ?
-    WHERE project_id = ?
+    WHERE project_id = ? AND (spec_id = ? OR (spec_id IS NULL AND ? IS NULL))
   `);
   stmt.run(
     data.step ?? existing.step,
@@ -110,15 +125,20 @@ export function updateStudioState(
     data.generatedSpec ?? existing.generatedSpec,
     JSON.stringify(data.suggestedChunks ?? existing.suggestedChunks),
     now,
-    projectId
+    projectId,
+    specId ?? null,
+    specId ?? null
   );
 
-  return getStudioState(projectId);
+  return getStudioState(projectId, specId);
 }
 
-export function deleteStudioState(projectId: string): boolean {
+export function deleteStudioState(projectId: string, specId?: string): boolean {
   const database = getDb();
-  const stmt = database.prepare(`DELETE FROM spec_studio_state WHERE project_id = ?`);
-  const result = stmt.run(projectId);
+  const stmt = database.prepare(`
+    DELETE FROM spec_studio_state
+    WHERE project_id = ? AND (spec_id = ? OR (spec_id IS NULL AND ? IS NULL))
+  `);
+  const result = stmt.run(projectId, specId ?? null, specId ?? null);
   return result.changes > 0;
 }
