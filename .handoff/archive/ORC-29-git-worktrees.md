@@ -39,7 +39,7 @@ With git worktrees:
 
 ### Worktree Lifecycle
 
-```
+```text
 Spec Start
   ↓
 Create unique worktree: {projectPath}-spec-{shortId}-{timestamp}
@@ -63,7 +63,7 @@ Mark spec as completed
 
 ### Directory Structure
 
-```
+```text
 /Users/acartagena/project/orchestrator                        (main repo)
 /Users/acartagena/project/orchestrator-spec-abc123de-1705501234  (spec 1 worktree)
 /Users/acartagena/project/orchestrator-spec-def456gh-1705501456  (spec 2 worktree)
@@ -810,6 +810,7 @@ export type SSEEvent =
 ## Testing
 
 ### Test 1: Basic Worktree Creation
+
 1. Create spec A
 2. Click "Run All"
 3. Verify worktree created at `{projectPath}-spec-{shortId}-{timestamp}`
@@ -817,6 +818,7 @@ export type SSEEvent =
 5. Verify chunks execute successfully
 
 ### Test 2: Parallel Execution
+
 1. Create spec A and B
 2. Start both specs
 3. Verify two worktrees created with different paths
@@ -824,6 +826,7 @@ export type SSEEvent =
 5. Verify separate branches and PRs created
 
 ### Test 3: Spec Re-run
+
 1. Complete spec A (creates worktree + PR)
 2. Click "Run All" again on spec A
 3. Verify NEW worktree created (different timestamp)
@@ -831,6 +834,7 @@ export type SSEEvent =
 5. Both worktrees independent
 
 ### Test 4: PR Merge Cleanup
+
 1. Complete spec A, PR created
 2. Merge PR on GitHub
 3. Wait 5 minutes (or trigger cleanup manually)
@@ -839,6 +843,7 @@ export type SSEEvent =
 6. Verify spec no longer shows "Running in worktree"
 
 ### Test 5: Stale Worktree Detection
+
 1. Create spec, run in worktree
 2. Don't merge PR
 3. Wait 7+ days (or modify `worktreeLastActivity` in DB to simulate)
@@ -848,17 +853,20 @@ export type SSEEvent =
 7. Verify worktree removed
 
 ### Test 6: Orphaned Worktree Cleanup
+
 1. Create worktree
 2. Manually delete spec from database
 3. Run cleanup job
 4. Verify orphaned worktree detected and removed
 
 ### Test 7: Too Many Parallel Specs Warning
+
 1. Start 5+ specs in worktrees
 2. Visit project page
 3. Verify warning shown: "5 specs running in parallel"
 
 ### Test 8: Error Handling
+
 1. Try creating worktree when path exists (simulate collision)
 2. Verify error shown, execution doesn't start
 3. Try removing worktree that doesn't exist

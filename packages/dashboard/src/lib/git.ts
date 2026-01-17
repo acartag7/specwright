@@ -548,6 +548,15 @@ export function createWorktree(
   specId: string,
   branchName: string
 ): { success: boolean; path?: string; error?: string } {
+  // Validate branch name before attempting git operations
+  const branchValidation = validateBranchName(branchName);
+  if (!branchValidation.valid) {
+    return {
+      success: false,
+      error: `Invalid branch name: ${branchValidation.error}`,
+    };
+  }
+
   const shortId = specId.slice(0, 8);
   const timestamp = Date.now();
   const worktreePath = `${projectPath}-spec-${shortId}-${timestamp}`;

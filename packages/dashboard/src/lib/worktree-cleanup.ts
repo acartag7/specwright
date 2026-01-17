@@ -75,7 +75,7 @@ export async function cleanupMergedWorktrees(): Promise<CleanupResult> {
           // Mark as merged and clear worktree path
           updateSpec(specRow.id, {
             prMerged: true,
-            worktreePath: null as unknown as string, // Setting to null to clear
+            worktreePath: null,
           });
           cleaned++;
           console.log(`[Cleanup] Removed merged worktree: ${specRow.worktree_path}`);
@@ -115,8 +115,10 @@ export async function cleanupMergedWorktrees(): Promise<CleanupResult> {
         // Skip main worktree (the project directory itself)
         if (worktree.path === projectRow.directory) continue;
 
-        // Check if this looks like a spec worktree (matches our naming pattern)
-        if (!worktree.path.includes('-spec-')) continue;
+        // Check if this looks like a spec worktree (matches our strict naming pattern)
+        // Format: {projectPath}-spec-{shortId}-{timestamp}
+        const specWorktreePrefix = `${projectRow.directory}-spec-`;
+        if (!worktree.path.startsWith(specWorktreePrefix)) continue;
 
         // If worktree exists in git but not in DB, it's orphaned
         if (!dbWorktreePaths.has(worktree.path)) {
@@ -195,8 +197,10 @@ export function getOrphanedWorktrees(projectId: string): string[] {
     // Skip main worktree
     if (worktree.path === project.directory) continue;
 
-    // Check if this looks like a spec worktree
-    if (!worktree.path.includes('-spec-')) continue;
+    // Check if this looks like a spec worktree (matches our strict naming pattern)
+    // Format: {projectPath}-spec-{shortId}-{timestamp}
+    const specWorktreePrefix = `${project.directory}-spec-`;
+    if (!worktree.path.startsWith(specWorktreePrefix)) continue;
 
     // If worktree exists in git but not in DB, it's orphaned
     if (!dbWorktreePaths.has(worktree.path)) {
@@ -241,7 +245,7 @@ export function removeWorktreeBySpecId(specId: string): { success: boolean; erro
   if (result.success) {
     // Clear worktree path in database
     updateSpec(specId, {
-      worktreePath: null as unknown as string,
+      worktreePath: null,
     });
   }
 

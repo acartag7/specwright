@@ -81,7 +81,7 @@ export default function WorktreesPage() {
     return (
       <div className="min-h-screen bg-neutral-950 flex items-center justify-center">
         <div className="flex items-center gap-3 text-neutral-400 font-mono">
-          <svg className="animate-spin w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24">
+          <svg className="animate-spin w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" aria-hidden="true">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
           </svg>
@@ -101,7 +101,7 @@ export default function WorktreesPage() {
             className="p-1.5 text-neutral-500 hover:text-neutral-300 hover:bg-neutral-800 rounded-md transition-colors"
             title="Back to projects"
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
             </svg>
           </Link>
@@ -111,13 +111,14 @@ export default function WorktreesPage() {
           </div>
           <div className="flex-1" />
           <button
+            type="button"
             onClick={handleRunCleanup}
             disabled={isCleaningUp}
             className="px-3 py-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/20 rounded-md font-mono text-xs transition-colors disabled:opacity-50 flex items-center gap-1.5"
           >
             {isCleaningUp ? (
               <>
-                <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24">
+                <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" aria-hidden="true">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                 </svg>
@@ -125,7 +126,7 @@ export default function WorktreesPage() {
               </>
             ) : (
               <>
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
                 Run Cleanup
@@ -167,7 +168,7 @@ export default function WorktreesPage() {
           {stale.length === 0 ? (
             <div className="bg-neutral-900/50 border border-neutral-800 rounded-md p-8 text-center">
               <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-neutral-800 flex items-center justify-center">
-                <svg className="w-6 h-6 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-6 h-6 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                 </svg>
               </div>
@@ -202,6 +203,7 @@ export default function WorktreesPage() {
                     </div>
                   </div>
                   <button
+                    type="button"
                     onClick={() => handleDeleteWorktree(item.specId)}
                     className="px-3 py-1.5 bg-red-500/10 text-red-400 border border-red-500/30 hover:bg-red-500/20 rounded-md font-mono text-xs transition-colors flex-shrink-0"
                   >

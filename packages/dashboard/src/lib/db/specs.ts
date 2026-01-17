@@ -107,9 +107,10 @@ export function updateSpec(
     prNumber?: number;
     prUrl?: string;
     // Worktree fields (ORC-29)
-    worktreePath?: string;
-    worktreeCreatedAt?: number;
-    worktreeLastActivity?: number;
+    // null means clear the value, undefined means keep existing
+    worktreePath?: string | null;
+    worktreeCreatedAt?: number | null;
+    worktreeLastActivity?: number | null;
     prMerged?: boolean;
   }
 ): Spec | null {
@@ -127,10 +128,16 @@ export function updateSpec(
     WHERE id = ?
   `);
 
-  // Handle worktreePath: undefined = keep existing, null = clear it
+  // Handle worktree fields: undefined = keep existing, null = clear it
   const worktreePath = data.worktreePath === undefined
     ? existing.worktree_path
-    : data.worktreePath === null ? null : data.worktreePath;
+    : data.worktreePath;
+  const worktreeCreatedAt = data.worktreeCreatedAt === undefined
+    ? existing.worktree_created_at
+    : data.worktreeCreatedAt;
+  const worktreeLastActivity = data.worktreeLastActivity === undefined
+    ? existing.worktree_last_activity
+    : data.worktreeLastActivity;
 
   updateStmt.run(
     data.title ?? existing.title,
@@ -141,8 +148,8 @@ export function updateSpec(
     data.prNumber ?? existing.pr_number,
     data.prUrl ?? existing.pr_url,
     worktreePath,
-    data.worktreeCreatedAt ?? existing.worktree_created_at,
-    data.worktreeLastActivity ?? existing.worktree_last_activity,
+    worktreeCreatedAt,
+    worktreeLastActivity,
     data.prMerged !== undefined ? (data.prMerged ? 1 : 0) : existing.pr_merged,
     now,
     id

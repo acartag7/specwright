@@ -202,6 +202,19 @@ export async function POST(_request: Request, context: RouteContext) {
               console.warn('[Git] Failed to create worktree:', worktreeResult.error);
               workingDirectory = projectDir;
 
+              // Clear stale worktree metadata if exists
+              if (spec.worktreePath) {
+                updateSpec(specId, {
+                  worktreePath: null,
+                  worktreeCreatedAt: null,
+                  worktreeLastActivity: null,
+                });
+                sendEvent(controller, encoder, isClosedRef, 'worktree_cleared', {
+                  path: spec.worktreePath,
+                  reason: 'Stale worktree path cleared',
+                });
+              }
+
               // Try to create and checkout the spec branch in-place
               const branchResult = await createBranch(projectDir, specBranch, originalBranch || undefined);
               if (branchResult.success) {
@@ -464,12 +477,27 @@ export async function POST(_request: Request, context: RouteContext) {
                       filesChanged: commitResult.filesChanged,
                     });
                   } else if (!commitResult.success) {
-                    // Commit failed - reset to clean state and emit failure event
-                    resetHard(gitDir);
-                    sendEvent(controller, encoder, isClosedRef, 'git_commit_failed', {
-                      chunkId: chunk.id,
-                      error: commitResult.error || 'Failed to commit changes',
-                    });
+                    // Check if it's a benign "no changes" or a real error
+                    const isNoChanges = commitResult.error?.toLowerCase().includes('no changes');
+                    if (isNoChanges) {
+                      // No changes to commit is benign - chunk still passes
+                      sendEvent(controller, encoder, isClosedRef, 'git_commit_skipped', {
+                        chunkId: chunk.id,
+                        reason: 'No changes to commit',
+                      });
+                    } else {
+                      // Real commit failure - abort the run
+                      resetHard(gitDir);
+                      sendEvent(controller, encoder, isClosedRef, 'git_commit_failed', {
+                        chunkId: chunk.id,
+                        error: commitResult.error || 'Failed to commit changes',
+                      });
+                      failedIds.add(chunk.id);
+                      failed++;
+                      hasFailure = true;
+                      stopReason = `Git commit failed for "${chunk.title}": ${commitResult.error || 'Unknown error'}`;
+                      break;
+                    }
                   }
                 }
                 completedIds.add(chunk.id);
@@ -514,12 +542,27 @@ export async function POST(_request: Request, context: RouteContext) {
                           filesChanged: commitResult.filesChanged,
                         });
                       } else if (!commitResult.success) {
-                        // Commit failed - reset to clean state and emit failure event
-                        resetHard(gitDir);
-                        sendEvent(controller, encoder, isClosedRef, 'git_commit_failed', {
-                          chunkId: result.fixChunkId,
-                          error: commitResult.error || 'Failed to commit fix changes',
-                        });
+                        // Check if it's a benign "no changes" or a real error
+                        const isNoChanges = commitResult.error?.toLowerCase().includes('no changes');
+                        if (isNoChanges) {
+                          // No changes to commit is benign - fix chunk still passes
+                          sendEvent(controller, encoder, isClosedRef, 'git_commit_skipped', {
+                            chunkId: result.fixChunkId,
+                            reason: 'No changes to commit',
+                          });
+                        } else {
+                          // Real commit failure - abort the run
+                          resetHard(gitDir);
+                          sendEvent(controller, encoder, isClosedRef, 'git_commit_failed', {
+                            chunkId: result.fixChunkId,
+                            error: commitResult.error || 'Failed to commit fix changes',
+                          });
+                          failedIds.add(chunk.id);
+                          failed++;
+                          hasFailure = true;
+                          stopReason = `Git commit failed for fix "${fixChunk.title}": ${commitResult.error || 'Unknown error'}`;
+                          break;
+                        }
                       }
                     }
                     completedIds.add(chunk.id);

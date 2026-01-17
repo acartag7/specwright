@@ -353,12 +353,14 @@ function runGitIntegrationMigrations(database: DatabaseType): void {
 }
 
 function runWorktreeMigrations(database: DatabaseType): void {
-  // Check if migration is needed by checking if 'worktree_path' column exists
+  // Check if migration is needed by checking for all required worktree columns
+  const requiredColumns = ['worktree_path', 'worktree_created_at', 'worktree_last_activity', 'pr_merged'];
   const tableInfo = database.prepare(`PRAGMA table_info(specs)`).all() as { name: string }[];
-  const hasWorktreePathColumn = tableInfo.some(col => col.name === 'worktree_path');
+  const existingColumns = new Set(tableInfo.map(col => col.name));
+  const missingColumns = requiredColumns.filter(col => !existingColumns.has(col));
 
-  if (!hasWorktreePathColumn) {
-    console.log('Running worktree migrations (ORC-29)...');
+  if (missingColumns.length > 0) {
+    console.log(`Running worktree migrations (ORC-29)... Missing columns: ${missingColumns.join(', ')}`);
 
     for (const migration of MIGRATIONS_WORKTREES) {
       try {
