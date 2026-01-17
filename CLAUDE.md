@@ -115,3 +115,90 @@ const client = new OpencodeClient();
 - Always use pnpm (not npm/yarn)
 - Dashboard runs on port 4740
 - opencode server must be running for GLM execution
+
+## Issue Tracking
+
+**Linear Project:** ORC (Orchestrator)
+
+### Bug Ticket Format
+
+Bugs use inline orchestrator spec prompts:
+
+```markdown
+## Problem
+Description of the bug.
+
+## Files Involved
+- `path/to/file.ts` (lines X-Y)
+
+## Orchestrator Spec Prompt
+\`\`\`
+Detailed spec prompt that can be pasted directly into the orchestrator.
+\`\`\`
+
+## Acceptance Criteria
+- [ ] Checkbox items
+```
+
+### Feature Ticket Format
+
+Features reference spec files (keeps tickets concise):
+
+```markdown
+## Summary
+Brief description of the feature.
+
+## Spec File
+`.handoff/specs/ORC-XX-feature-name.md` (to be created)
+
+## Why This Matters
+- Key points
+
+## Acceptance Criteria
+- [ ] Checkbox items
+```
+
+### Spec Files Location
+
+Feature implementation specs live in `.handoff/specs/`:
+
+```
+.handoff/specs/
+├── ORC-21-git-integration.md
+├── ORC-22-spec-editing.md
+├── ORC-23-chunk-editing.md
+├── ORC-24-spec-templates.md
+├── ORC-25-auto-chunking.md
+├── ORC-26-model-optimization.md
+├── ORC-27-cli-interface.md
+└── ORC-29-git-worktrees.md
+```
+
+These files contain detailed implementation specs that the orchestrator can use directly.
+
+## Workflow Patterns
+
+### Ralph Loop (Git Integration)
+
+When git integration is enabled (ORC-21):
+1. Branch created per spec: `spec/{spec-slug}`
+2. Commit after each successful chunk
+3. Git reset on chunk failure
+4. Switch back to original branch when done
+
+### Git Worktrees (Parallel Execution)
+
+When worktrees are enabled (ORC-29):
+1. Each spec gets its own worktree: `../project-spec-{shortId}/`
+2. Multiple specs can run in parallel
+3. Worktree cleaned up after PR is merged
+
+### Model Allocation
+
+When model optimization is enabled (ORC-26):
+| Task | Model |
+|------|-------|
+| Spec refinement | Opus |
+| Chunk execution | GLM |
+| Review (pass/fail) | Sonnet |
+| Fix generation | Sonnet |
