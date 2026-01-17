@@ -3,7 +3,7 @@ import path from 'path';
 import os from 'os';
 import { existsSync, mkdirSync } from 'fs';
 import { randomUUID } from 'crypto';
-import { MVP_SCHEMA, MIGRATIONS_PHASE2, MIGRATIONS_REVIEW_LOOP, MIGRATIONS_PHASE3_DEPS, MIGRATIONS_OUTPUT_SUMMARY, MIGRATIONS_PHASE4_WORKERS, MIGRATIONS_CONFIG_SYSTEM, MIGRATIONS_CASCADE_DELETE } from '@specwright/shared';
+import { MVP_SCHEMA, MIGRATIONS_PHASE2, MIGRATIONS_REVIEW_LOOP, MIGRATIONS_PHASE3_DEPS, MIGRATIONS_OUTPUT_SUMMARY, MIGRATIONS_PHASE4_WORKERS, MIGRATIONS_CONFIG_SYSTEM, MIGRATIONS_CASCADE_DELETE, MIGRATIONS_GIT_INTEGRATION } from '@specwright/shared';
 
 const DB_DIR = path.join(os.homedir(), '.specwright');
 const DB_PATH = process.env.DB_PATH || path.join(DB_DIR, 'orchestrator.db');
@@ -48,6 +48,9 @@ export function getDb(): DatabaseType {
 
   // Run Spec Studio State migrations (ORC-46)
   runSpecStudioStateMigrations(db);
+
+  // Run Git Integration migrations (ORC-21)
+  runGitIntegrationMigrations(db);
 
   return db;
 }
@@ -317,6 +320,32 @@ function runSpecStudioStateMigrations(database: DatabaseType): void {
     database.exec(`CREATE INDEX IF NOT EXISTS idx_studio_spec ON spec_studio_state(spec_id)`);
   } catch (err) {
     console.warn(`Index creation warning: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+function runGitIntegrationMigrations(database: DatabaseType): void {
+  // Check if migration is needed by checking both columns
+  const specsTableInfo = database.prepare(`PRAGMA table_info(specs)`).all() as { name: string }[];
+  const chunksTableInfo = database.prepare(`PRAGMA table_info(chunks)`).all() as { name: string }[];
+
+  const hasOriginalBranchColumn = specsTableInfo.some(col => col.name === 'original_branch');
+  const hasCommitHashColumn = chunksTableInfo.some(col => col.name === 'commit_hash');
+
+  // Only skip if BOTH columns exist
+  if (hasOriginalBranchColumn && hasCommitHashColumn) {
+    return;
+  }
+
+  for (const migration of MIGRATIONS_GIT_INTEGRATION) {
+    try {
+      database.exec(migration);
+    } catch (err) {
+      // Column might already exist, ignore
+      const message = err instanceof Error ? err.message : String(err);
+      if (!message.includes('duplicate column')) {
+        console.warn(`Migration warning: ${message}`);
+      }
+    }
   }
 }
 
