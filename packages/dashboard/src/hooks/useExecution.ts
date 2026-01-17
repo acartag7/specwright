@@ -1,24 +1,38 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import type { Chunk, ChunkToolCall, ChunkStatus, ReviewResult, ReviewStatus } from '@specwright/shared';
+import type { Chunk, ChunkToolCall, ChunkStatus, ReviewResult, ReviewStatus, Spec } from '@specwright/shared';
 
 /** Polling interval in milliseconds for chunk status updates */
 const POLL_INTERVAL_MS = 3000;
 
 /**
- * Compares chunk arrays to detect status changes, ignoring metadata fields.
- * Returns true if any chunk's status or error field has changed.
+ * Compares chunk arrays to detect status changes by chunk id.
+ * Returns true if any chunk's status or error field has changed,
+ * or if chunks were added/removed.
  */
 function hasStatusChanged(oldChunks: Chunk[], newChunks: Chunk[]): boolean {
   if (!oldChunks || !newChunks) return true;
-  if (oldChunks.length !== newChunks.length) return true;
 
-  return oldChunks.some((oldChunk, idx) => {
-    const newChunk = newChunks[idx];
-    return oldChunk.status !== newChunk.status ||
-           oldChunk.error !== newChunk.error;
-  });
+  // Build map from newChunks by id
+  const newChunkMap = new Map(newChunks.map(chunk => [chunk.id, chunk]));
+
+  // Check if any oldChunk has changed or is missing
+  for (const oldChunk of oldChunks) {
+    const newChunk = newChunkMap.get(oldChunk.id);
+    if (!newChunk) return true; // Chunk removed
+    if (oldChunk.status !== newChunk.status || oldChunk.error !== newChunk.error) {
+      return true;
+    }
+  }
+
+  // Check if newChunks contains any id not present in oldChunks
+  const oldChunkIds = new Set(oldChunks.map(chunk => chunk.id));
+  for (const newChunk of newChunks) {
+    if (!oldChunkIds.has(newChunk.id)) return true; // New chunk added
+  }
+
+  return false;
 }
 
 interface ExecutionState {
@@ -52,9 +66,9 @@ interface UseExecutionReturn {
 interface UseExecutionProps {
   specId?: string;
   chunks?: Chunk[];
-  spec?: { status: string };
+  spec?: Spec;
   onChunksUpdate?: (chunks: Chunk[]) => void;
-  onSpecUpdate?: (spec: any) => void;
+  onSpecUpdate?: (spec: Spec) => void;
 }
 
 /**
@@ -142,6 +156,8 @@ export function useExecution(props: UseExecutionProps = {}): UseExecutionReturn 
         if (!response.ok) {
           if (response.status === 404 || response.status === 401 || response.status === 403) {
             console.error('Polling stopped: spec not found or auth error');
+            clearInterval(intervalId);
+            abortControllerRef.current?.abort();
             setIsPolling(false);
             return;
           }
