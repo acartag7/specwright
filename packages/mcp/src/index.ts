@@ -1,5 +1,5 @@
 /**
- * Specwright MCP Server v2
+ * Specwright MCP Server v4
  *
  * Delegates coding tasks to GLM-4.7 (via opencode HTTP API)
  * and planning/review tasks to Opus (via Claude CLI)

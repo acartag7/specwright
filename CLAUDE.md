@@ -97,6 +97,7 @@ Tables: `projects`, `specs`, `chunks`, `tool_calls`
 ## AI Integration
 
 ### Opus (Planning/Review)
+
 ```typescript
 import { ClaudeClient } from '@specwright/mcp';
 const client = new ClaudeClient();
@@ -104,6 +105,7 @@ await client.executePrompt(prompt, workingDir);
 ```
 
 ### Executor (opencode/GLM)
+
 ```typescript
 import { OpencodeClient } from '@specwright/mcp';
 const client = new OpencodeClient();

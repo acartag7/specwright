@@ -93,7 +93,7 @@ packages:
 ```
 
 ### Package Names
-- `@specwright/mcp` → publishes as `glm-orchestrator` on npm
+- `@specwright/mcp` → publishes as `specwright` on npm
 - `@specwright/dashboard` → not published (web app)
 - `@specwright/shared` → internal package, not published
 
