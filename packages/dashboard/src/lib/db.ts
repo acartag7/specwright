@@ -3,7 +3,7 @@ import path from 'path';
 import os from 'os';
 import { existsSync, mkdirSync } from 'fs';
 import { randomUUID } from 'crypto';
-import { MVP_SCHEMA, MIGRATIONS_PHASE2, MIGRATIONS_REVIEW_LOOP, MIGRATIONS_PHASE3_DEPS, MIGRATIONS_OUTPUT_SUMMARY, MIGRATIONS_PHASE4_WORKERS, MIGRATIONS_CONFIG_SYSTEM } from '@specwright/shared';
+import { MVP_SCHEMA, MIGRATIONS_PHASE2, MIGRATIONS_REVIEW_LOOP, MIGRATIONS_PHASE3_DEPS, MIGRATIONS_OUTPUT_SUMMARY, MIGRATIONS_PHASE4_WORKERS, MIGRATIONS_CONFIG_SYSTEM, MIGRATIONS_CASCADE_DELETE } from '@specwright/shared';
 import type { Project, Spec, Chunk, ChunkToolCall, SpecStudioState, SpecStudioStep, Question, ChunkSuggestion, SpecStatus, ReviewStatus, Worker, WorkerStatus, WorkerQueueItem, WorkerProgress, ProjectConfig } from '@specwright/shared';
 
 const DB_DIR = path.join(os.homedir(), '.specwright');
@@ -43,6 +43,9 @@ function getDb(): DatabaseType {
 
   // Run Configuration System migrations (add config_json column to projects table)
   runConfigSystemMigrations(db);
+
+  // Run Cascade Delete migrations (ORC-31)
+  runCascadeDeleteMigrations(db);
 
   return db;
 }
@@ -161,6 +164,82 @@ function runConfigSystemMigrations(database: DatabaseType): void {
         }
       }
     }
+  }
+}
+
+interface ForeignKeyInfo {
+  id: number;
+  seq: number;
+  table: string;
+  from: string;
+  to: string;
+  on_update: string;
+  on_delete: string;
+  match: string;
+}
+
+function runCascadeDeleteMigrations(database: DatabaseType): void {
+  // Check if migration is needed by examining foreign key constraints on ALL affected tables
+  // A partial migration could leave some tables without CASCADE, so check all of them
+  const tablesToCheck = ['specs', 'chunks', 'chunk_tool_calls', 'spec_studio_state', 'workers', 'worker_queue'];
+
+  const allHaveCascade = tablesToCheck.every(table => {
+    try {
+      const fkInfo = database.prepare(`PRAGMA foreign_key_list(${table})`).all() as ForeignKeyInfo[];
+      // A table needs CASCADE if it has any foreign keys
+      // Skip tables with no FKs (shouldn't happen but be safe)
+      if (fkInfo.length === 0) return true;
+      // All foreign keys in this table must have CASCADE
+      return fkInfo.every(fk => fk.on_delete === 'CASCADE');
+    } catch {
+      // Table doesn't exist yet (fresh database) - doesn't need migration
+      return true;
+    }
+  });
+
+  if (allHaveCascade) {
+    // Migration already applied or fresh database with new schema
+    return;
+  }
+
+  console.log('Running cascade delete migration (ORC-31)...');
+
+  // Disable FK enforcement during migration - required for DROP TABLE with references
+  database.exec('PRAGMA foreign_keys = OFF');
+
+  // Run migrations within a transaction for safety
+  const transaction = database.transaction(() => {
+    for (const migration of MIGRATIONS_CASCADE_DELETE) {
+      try {
+        database.exec(migration);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        // Ignore errors for tables that don't exist yet (fresh database)
+        if (!message.includes('no such table')) {
+          throw err;
+        }
+      }
+    }
+  });
+
+  try {
+    transaction();
+    // Re-enable FK enforcement and verify integrity
+    database.exec('PRAGMA foreign_keys = ON');
+    // PRAGMA foreign_key_check returns rows for violations, not an error
+    const fkViolations = database.prepare('PRAGMA foreign_key_check').all();
+    if (fkViolations.length > 0) {
+      console.error('Foreign key violations detected after migration:', fkViolations);
+      // Violations indicate data integrity issues - log but don't throw
+      // since we can't easily rollback at this point
+    }
+    console.log('Cascade delete migration completed successfully');
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`Cascade delete migration failed: ${message}`);
+    // Ensure FK enforcement is re-enabled even on error
+    database.exec('PRAGMA foreign_keys = ON');
+    // Don't throw - allow the app to continue with existing schema
   }
 }
 

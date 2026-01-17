@@ -298,3 +298,148 @@ export const MIGRATIONS_PHASE4_WORKERS = [
 export const MIGRATIONS_CONFIG_SYSTEM = [
   `ALTER TABLE projects ADD COLUMN config_json TEXT`,
 ];
+
+/**
+ * Migration queries for Cascade Delete (ORC-31)
+ * Recreates tables with ON DELETE CASCADE constraints for existing databases
+ * that were created before cascade constraints were added to the schema.
+ *
+ * SQLite doesn't support ALTER TABLE for foreign keys, so we must:
+ * 1. Create new table with proper constraints
+ * 2. Copy data
+ * 3. Drop old table
+ * 4. Rename new table
+ */
+export const MIGRATIONS_CASCADE_DELETE = [
+  // Recreate specs table with cascade delete
+  `CREATE TABLE IF NOT EXISTS specs_new (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    content TEXT NOT NULL DEFAULT '',
+    version INTEGER DEFAULT 1,
+    status TEXT DEFAULT 'draft',
+    branch_name TEXT,
+    pr_number INTEGER,
+    pr_url TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+  )`,
+  `INSERT INTO specs_new (id, project_id, title, content, version, status, branch_name, pr_number, pr_url, created_at, updated_at)
+   SELECT id, project_id, title, content, version, status, branch_name, pr_number, pr_url, created_at, updated_at
+   FROM specs WHERE project_id IN (SELECT id FROM projects)`,
+  `DROP TABLE specs`,
+  `ALTER TABLE specs_new RENAME TO specs`,
+  `CREATE INDEX IF NOT EXISTS idx_specs_project ON specs(project_id)`,
+
+  // Recreate chunks table with cascade delete
+  `CREATE TABLE IF NOT EXISTS chunks_new (
+    id TEXT PRIMARY KEY,
+    spec_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    "order" INTEGER NOT NULL,
+    status TEXT DEFAULT 'pending',
+    output TEXT,
+    output_summary TEXT,
+    error TEXT,
+    started_at INTEGER,
+    completed_at INTEGER,
+    review_status TEXT,
+    review_feedback TEXT,
+    dependencies TEXT DEFAULT '[]',
+    FOREIGN KEY (spec_id) REFERENCES specs(id) ON DELETE CASCADE
+  )`,
+  `INSERT INTO chunks_new (id, spec_id, title, description, "order", status, output, output_summary, error, started_at, completed_at, review_status, review_feedback, dependencies)
+   SELECT id, spec_id, title, description, "order", status, output, output_summary, error, started_at, completed_at, review_status, review_feedback, dependencies
+   FROM chunks WHERE spec_id IN (SELECT id FROM specs)`,
+  `DROP TABLE chunks`,
+  `ALTER TABLE chunks_new RENAME TO chunks`,
+  `CREATE INDEX IF NOT EXISTS idx_chunks_spec ON chunks(spec_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_chunks_status ON chunks(status)`,
+
+  // Recreate chunk_tool_calls table with cascade delete
+  `CREATE TABLE IF NOT EXISTS chunk_tool_calls_new (
+    id TEXT PRIMARY KEY,
+    chunk_id TEXT NOT NULL,
+    tool TEXT NOT NULL,
+    input TEXT NOT NULL,
+    output TEXT,
+    status TEXT DEFAULT 'running',
+    started_at INTEGER NOT NULL,
+    completed_at INTEGER,
+    FOREIGN KEY (chunk_id) REFERENCES chunks(id) ON DELETE CASCADE
+  )`,
+  `INSERT INTO chunk_tool_calls_new (id, chunk_id, tool, input, output, status, started_at, completed_at)
+   SELECT id, chunk_id, tool, input, output, status, started_at, completed_at
+   FROM chunk_tool_calls WHERE chunk_id IN (SELECT id FROM chunks)`,
+  `DROP TABLE chunk_tool_calls`,
+  `ALTER TABLE chunk_tool_calls_new RENAME TO chunk_tool_calls`,
+  `CREATE INDEX IF NOT EXISTS idx_chunk_tool_calls_chunk ON chunk_tool_calls(chunk_id)`,
+
+  // Recreate spec_studio_state table with cascade delete
+  `CREATE TABLE IF NOT EXISTS spec_studio_state_new (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL UNIQUE,
+    step TEXT NOT NULL DEFAULT 'intent',
+    intent TEXT DEFAULT '',
+    questions TEXT DEFAULT '[]',
+    answers TEXT DEFAULT '{}',
+    generated_spec TEXT DEFAULT '',
+    suggested_chunks TEXT DEFAULT '[]',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+  )`,
+  `INSERT INTO spec_studio_state_new (id, project_id, step, intent, questions, answers, generated_spec, suggested_chunks, created_at, updated_at)
+   SELECT id, project_id, step, intent, questions, answers, generated_spec, suggested_chunks, created_at, updated_at
+   FROM spec_studio_state WHERE project_id IN (SELECT id FROM projects)`,
+  `DROP TABLE spec_studio_state`,
+  `ALTER TABLE spec_studio_state_new RENAME TO spec_studio_state`,
+  `CREATE INDEX IF NOT EXISTS idx_studio_project ON spec_studio_state(project_id)`,
+
+  // Workers and worker_queue already have cascade in their creation migration,
+  // but recreate them for databases that created them before cascade was added
+  `CREATE TABLE IF NOT EXISTS workers_new (
+    id TEXT PRIMARY KEY,
+    spec_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    status TEXT DEFAULT 'idle',
+    current_chunk_id TEXT,
+    current_step TEXT,
+    progress_current INTEGER DEFAULT 0,
+    progress_total INTEGER DEFAULT 0,
+    progress_passed INTEGER DEFAULT 0,
+    progress_failed INTEGER DEFAULT 0,
+    started_at INTEGER,
+    completed_at INTEGER,
+    error TEXT,
+    FOREIGN KEY (spec_id) REFERENCES specs(id) ON DELETE CASCADE,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+  )`,
+  `INSERT INTO workers_new (id, spec_id, project_id, status, current_chunk_id, current_step, progress_current, progress_total, progress_passed, progress_failed, started_at, completed_at, error)
+   SELECT id, spec_id, project_id, status, current_chunk_id, current_step, progress_current, progress_total, progress_passed, progress_failed, started_at, completed_at, error
+   FROM workers WHERE spec_id IN (SELECT id FROM specs) AND project_id IN (SELECT id FROM projects)`,
+  `DROP TABLE workers`,
+  `ALTER TABLE workers_new RENAME TO workers`,
+  `CREATE INDEX IF NOT EXISTS idx_workers_status ON workers(status)`,
+  `CREATE INDEX IF NOT EXISTS idx_workers_spec ON workers(spec_id)`,
+
+  `CREATE TABLE IF NOT EXISTS worker_queue_new (
+    id TEXT PRIMARY KEY,
+    spec_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    priority INTEGER DEFAULT 0,
+    added_at INTEGER NOT NULL,
+    FOREIGN KEY (spec_id) REFERENCES specs(id) ON DELETE CASCADE,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+  )`,
+  `INSERT INTO worker_queue_new (id, spec_id, project_id, priority, added_at)
+   SELECT id, spec_id, project_id, priority, added_at
+   FROM worker_queue WHERE spec_id IN (SELECT id FROM specs) AND project_id IN (SELECT id FROM projects)`,
+  `DROP TABLE worker_queue`,
+  `ALTER TABLE worker_queue_new RENAME TO worker_queue`,
+  `CREATE INDEX IF NOT EXISTS idx_queue_priority ON worker_queue(priority DESC, added_at ASC)`,
+  `CREATE INDEX IF NOT EXISTS idx_queue_spec ON worker_queue(spec_id)`,
+];
