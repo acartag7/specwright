@@ -81,13 +81,13 @@ async function delegateToGLMViaHttp(
 
     // Subscribe to events for this session
     const sessionHandler = client.createSessionHandler(session.id, {
-      onSessionStatus: (_, status: SessionStatus) => {
+      onSessionStatus: (_id: string, status: SessionStatus) => {
         console.error(`[GLM] Status: ${status}`);
         if (status === "idle") {
           completed = true;
         }
       },
-      onToolCall: (_, toolCall: ToolCallEvent) => {
+      onToolCall: (_id: string, toolCall: ToolCallEvent) => {
         console.error(`[GLM] Tool: ${toolCall.tool} (${toolCall.state})`);
         toolCalls.push(toolCall);
 
@@ -101,10 +101,10 @@ async function delegateToGLMViaHttp(
           toolCall.output || null
         );
       },
-      onTextChunk: (_, text: string) => {
+      onTextChunk: (_id: string, text: string) => {
         textOutput = text; // Latest full text
       },
-      onComplete: () => {
+      onComplete: (_id: string) => {
         completed = true;
       },
     });

@@ -14,6 +14,8 @@ import type {
   SessionStatus,
   EventHandler,
   ToolCallEvent,
+  ErrorInfo,
+  FileDiff,
 } from "@specwright/shared";
 
 const DEFAULT_OPENCODE_URL = "http://localhost:4096";
@@ -352,20 +354,20 @@ export class OpencodeClient {
     callbacks: Partial<EventHandler>
   ): EventHandler {
     return {
-      onSessionStatus: (id, status) => {
+      onSessionStatus: (id: string, status: SessionStatus) => {
         if (id === sessionId) callbacks.onSessionStatus?.(id, status);
       },
-      onToolCall: (id, toolCall) => {
+      onToolCall: (id: string, toolCall: ToolCallEvent) => {
         if (id === sessionId) callbacks.onToolCall?.(id, toolCall);
       },
-      onTextChunk: (id, text) => {
+      onTextChunk: (id: string, text: string) => {
         if (id === sessionId) callbacks.onTextChunk?.(id, text);
       },
-      onFileEdit: callbacks.onFileEdit || (() => {}),
-      onError: (id, error) => {
+      onFileEdit: callbacks.onFileEdit || ((_path: string, _diff: FileDiff) => {}),
+      onError: (id: string, error: ErrorInfo) => {
         if (id === sessionId) callbacks.onError?.(id, error);
       },
-      onComplete: (id) => {
+      onComplete: (id: string) => {
         if (id === sessionId) callbacks.onComplete?.(id);
       },
     };
