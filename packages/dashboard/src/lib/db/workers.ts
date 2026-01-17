@@ -151,7 +151,7 @@ export function updateWorker(id: string, data: {
         progress_total = ?,
         progress_passed = ?,
         progress_failed = ?,
-        completed_at = CASE WHEN ? IN ('completed', 'failed') THEN ? ELSE completed_at END,
+        completed_at = CASE WHEN ? IN ('completed', 'failed') AND completed_at IS NULL THEN ? ELSE completed_at END,
         error = ?
     WHERE id = ?
   `);

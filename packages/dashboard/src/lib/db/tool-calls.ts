@@ -13,11 +13,18 @@ interface ToolCallRow {
 }
 
 function rowToToolCall(row: ToolCallRow): ChunkToolCall {
+  let input: Record<string, unknown> = {};
+  try {
+    input = JSON.parse(row.input);
+  } catch {
+    input = {};
+  }
+
   return {
     id: row.id,
     chunkId: row.chunk_id,
     tool: row.tool,
-    input: JSON.parse(row.input),
+    input,
     output: row.output ?? undefined,
     status: row.status as ChunkToolCall['status'],
     startedAt: row.started_at,

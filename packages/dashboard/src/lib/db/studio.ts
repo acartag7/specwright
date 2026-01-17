@@ -15,15 +15,35 @@ interface StudioStateRow {
 }
 
 function rowToStudioState(row: StudioStateRow): SpecStudioState {
+  let questions: Question[] = [];
+  let answers: Record<string, string | string[]> = {};
+  let suggestedChunks: ChunkSuggestion[] = [];
+
+  try {
+    questions = JSON.parse(row.questions) as Question[];
+  } catch {
+    questions = [];
+  }
+  try {
+    answers = JSON.parse(row.answers) as Record<string, string | string[]>;
+  } catch {
+    answers = {};
+  }
+  try {
+    suggestedChunks = JSON.parse(row.suggested_chunks) as ChunkSuggestion[];
+  } catch {
+    suggestedChunks = [];
+  }
+
   return {
     id: row.id,
     projectId: row.project_id,
     step: row.step as SpecStudioStep,
     intent: row.intent,
-    questions: JSON.parse(row.questions) as Question[],
-    answers: JSON.parse(row.answers) as Record<string, string | string[]>,
+    questions,
+    answers,
     generatedSpec: row.generated_spec,
-    suggestedChunks: JSON.parse(row.suggested_chunks) as ChunkSuggestion[],
+    suggestedChunks,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

@@ -111,7 +111,7 @@ export function updateChunk(id: string, data: {
     UPDATE chunks
     SET title = ?, description = ?, "order" = ?, status = ?, output = ?, output_summary = ?, error = ?,
         started_at = CASE WHEN ? = 'running' AND started_at IS NULL THEN ? ELSE started_at END,
-        completed_at = CASE WHEN ? IN ('completed', 'failed') THEN ? ELSE completed_at END,
+        completed_at = CASE WHEN ? IN ('completed', 'failed') AND completed_at IS NULL THEN ? ELSE completed_at END,
         review_status = ?, review_feedback = ?, dependencies = ?
     WHERE id = ?
   `);
@@ -172,22 +172,28 @@ export function insertFixChunk(afterChunkId: string, fixData: { title: string; d
 
   const newOrder = originalChunk.order + 1;
 
+  // Create the fix chunk (depends on the original chunk)
+  const id = generateId();
+  const dependencies = [afterChunkId];  // Fix chunk depends on the chunk it's fixing
+
   // Shift all chunks after the original chunk down by one
   const shiftStmt = database.prepare(`
     UPDATE chunks
     SET "order" = "order" + 1
     WHERE spec_id = ? AND "order" >= ?
   `);
-  shiftStmt.run(originalChunk.specId, newOrder);
 
-  // Create the fix chunk (depends on the original chunk)
-  const id = generateId();
-  const dependencies = [afterChunkId];  // Fix chunk depends on the chunk it's fixing
-  const stmt = database.prepare(`
+  const insertStmt = database.prepare(`
     INSERT INTO chunks (id, spec_id, title, description, "order", status, dependencies)
     VALUES (?, ?, ?, ?, ?, 'pending', ?)
   `);
-  stmt.run(id, originalChunk.specId, fixData.title, fixData.description, newOrder, JSON.stringify(dependencies));
+
+  // Wrap shift and insert in a transaction for atomicity
+  const transaction = database.transaction(() => {
+    shiftStmt.run(originalChunk.specId, newOrder);
+    insertStmt.run(id, originalChunk.specId, fixData.title, fixData.description, newOrder, JSON.stringify(dependencies));
+  });
+  transaction();
 
   return {
     id,
