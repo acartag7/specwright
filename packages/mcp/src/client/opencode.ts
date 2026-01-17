@@ -14,7 +14,7 @@ import type {
   SessionStatus,
   EventHandler,
   ToolCallEvent,
-} from "@glm/shared";
+} from "@specwright/shared";
 
 const DEFAULT_OPENCODE_URL = "http://localhost:4096";
 const RECONNECT_DELAY_MS = 1000;

@@ -1,11 +1,11 @@
 {
-  "name": "glm-orchestrator-monorepo",
+  "name": "specwright-monorepo",
   "private": true,
   "scripts": {
     "build": "turbo build",
     "dev": "turbo dev",
-    "dev:mcp": "pnpm --filter @glm/mcp dev",
-    "dev:dashboard": "pnpm --filter @glm/dashboard dev",
+    "dev:mcp": "pnpm --filter @specwright/mcp dev",
+    "dev:dashboard": "pnpm --filter @specwright/dashboard dev",
     "lint": "turbo lint",
     "test": "turbo test",
     "prepare": "husky"

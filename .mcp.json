@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "glm-orchestrator": {
+    "specwright": {
       "command": "node",
       "args": ["/Users/acartagena/project/orchestrator/dist/index.js"]
     }
