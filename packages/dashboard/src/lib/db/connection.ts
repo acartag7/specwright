@@ -3,7 +3,7 @@ import path from 'path';
 import os from 'os';
 import { existsSync, mkdirSync } from 'fs';
 import { randomUUID } from 'crypto';
-import { MVP_SCHEMA, MIGRATIONS_PHASE2, MIGRATIONS_REVIEW_LOOP, MIGRATIONS_PHASE3_DEPS, MIGRATIONS_OUTPUT_SUMMARY, MIGRATIONS_PHASE4_WORKERS, MIGRATIONS_CONFIG_SYSTEM, MIGRATIONS_CASCADE_DELETE, MIGRATIONS_GIT_INTEGRATION } from '@specwright/shared';
+import { MVP_SCHEMA, MIGRATIONS_PHASE2, MIGRATIONS_REVIEW_LOOP, MIGRATIONS_PHASE3_DEPS, MIGRATIONS_OUTPUT_SUMMARY, MIGRATIONS_PHASE4_WORKERS, MIGRATIONS_CONFIG_SYSTEM, MIGRATIONS_CASCADE_DELETE, MIGRATIONS_GIT_INTEGRATION, MIGRATIONS_WORKTREES } from '@specwright/shared';
 
 const DB_DIR = path.join(os.homedir(), '.specwright');
 const DB_PATH = process.env.DB_PATH || path.join(DB_DIR, 'orchestrator.db');
@@ -51,6 +51,9 @@ export function getDb(): DatabaseType {
 
   // Run Git Integration migrations (ORC-21)
   runGitIntegrationMigrations(db);
+
+  // Run Worktree migrations (ORC-29)
+  runWorktreeMigrations(db);
 
   return db;
 }
@@ -346,6 +349,32 @@ function runGitIntegrationMigrations(database: DatabaseType): void {
         console.warn(`Migration warning: ${message}`);
       }
     }
+  }
+}
+
+function runWorktreeMigrations(database: DatabaseType): void {
+  // Check if migration is needed by checking for all required worktree columns
+  const requiredColumns = ['worktree_path', 'worktree_created_at', 'worktree_last_activity', 'pr_merged'];
+  const tableInfo = database.prepare(`PRAGMA table_info(specs)`).all() as { name: string }[];
+  const existingColumns = new Set(tableInfo.map(col => col.name));
+  const missingColumns = requiredColumns.filter(col => !existingColumns.has(col));
+
+  if (missingColumns.length > 0) {
+    console.log(`Running worktree migrations (ORC-29)... Missing columns: ${missingColumns.join(', ')}`);
+
+    for (const migration of MIGRATIONS_WORKTREES) {
+      try {
+        database.exec(migration);
+      } catch (err) {
+        // Column might already exist, ignore
+        const message = err instanceof Error ? err.message : String(err);
+        if (!message.includes('duplicate column')) {
+          console.warn(`Migration warning: ${message}`);
+        }
+      }
+    }
+
+    console.log('Worktree migrations completed');
   }
 }
 
