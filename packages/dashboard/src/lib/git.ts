@@ -1,7 +1,39 @@
-import { execSync, exec } from 'child_process';
+import { execSync, exec, spawnSync } from 'child_process';
 import { promisify } from 'util';
 
 const execAsync = promisify(exec);
+
+/**
+ * Safe wrapper for git commands that prevents command injection
+ */
+function gitSync(args: string[], cwd: string): { stdout: string; stderr: string; status: number | null } {
+  const result = spawnSync('git', args, {
+    cwd,
+    encoding: 'utf-8',
+    shell: false, // Critical: don't use shell to prevent injection
+  });
+  return {
+    stdout: result.stdout || '',
+    stderr: result.stderr || '',
+    status: result.status,
+  };
+}
+
+/**
+ * Safe wrapper for gh CLI commands that prevents command injection
+ */
+function ghSync(args: string[], cwd: string): { stdout: string; stderr: string; status: number | null } {
+  const result = spawnSync('gh', args, {
+    cwd,
+    encoding: 'utf-8',
+    shell: false, // Critical: don't use shell to prevent injection
+  });
+  return {
+    stdout: result.stdout || '',
+    stderr: result.stderr || '',
+    status: result.status,
+  };
+}
 
 export interface GitStatus {
   branch: string;
@@ -129,16 +161,10 @@ export async function createBranch(
     // If base branch specified, make sure we're on it first
     if (baseBranch) {
       try {
-        execSync(`git checkout ${baseBranch}`, {
-          cwd: directory,
-          stdio: 'pipe',
-        });
+        gitSync(['checkout', baseBranch], directory);
         // Pull latest
         try {
-          execSync(`git pull origin ${baseBranch}`, {
-            cwd: directory,
-            stdio: 'pipe',
-          });
+          gitSync(['pull', 'origin', baseBranch], directory);
         } catch {
           // Remote may not exist, continue anyway
         }
@@ -148,10 +174,20 @@ export async function createBranch(
     }
 
     // Create and checkout new branch
-    execSync(`git checkout -b ${branchName}`, {
-      cwd: directory,
-      stdio: 'pipe',
-    });
+    const result = gitSync(['checkout', '-b', branchName], directory);
+    if (result.status !== 0) {
+      const message = result.stderr;
+      if (message.includes('already exists')) {
+        return {
+          success: false,
+          error: { type: 'branch_exists', message: `Branch '${branchName}' already exists` },
+        };
+      }
+      return {
+        success: false,
+        error: { type: 'unknown', message },
+      };
+    }
 
     return { success: true };
   } catch (e) {
@@ -174,11 +210,8 @@ export async function createBranch(
  */
 export function checkoutBranch(directory: string, branchName: string): boolean {
   try {
-    execSync(`git checkout ${branchName}`, {
-      cwd: directory,
-      stdio: 'pipe',
-    });
-    return true;
+    const result = gitSync(['checkout', branchName], directory);
+    return result.status === 0;
   } catch {
     return false;
   }
@@ -207,10 +240,8 @@ export async function createCommit(
 ): Promise<{ success: boolean; commitHash?: string; filesChanged?: number; error?: string }> {
   try {
     // Check for changes
-    const status = execSync('git status --porcelain', {
-      cwd: directory,
-      encoding: 'utf-8',
-    }).trim();
+    const statusResult = gitSync(['status', '--porcelain'], directory);
+    const status = statusResult.stdout.trim();
 
     if (!status) {
       return { success: false, error: 'No changes to commit' };
@@ -219,22 +250,20 @@ export async function createCommit(
     const filesChanged = status.split('\n').filter(Boolean).length;
 
     // Stage all changes
-    execSync('git add -A', {
-      cwd: directory,
-      stdio: 'pipe',
-    });
+    const addResult = gitSync(['add', '-A'], directory);
+    if (addResult.status !== 0) {
+      return { success: false, error: addResult.stderr || 'Failed to stage changes' };
+    }
 
-    // Create commit - use heredoc style to handle special characters
-    execSync(`git commit -m "${message.replace(/"/g, '\\"').replace(/\$/g, '\\$')}"`, {
-      cwd: directory,
-      stdio: 'pipe',
-    });
+    // Create commit - message is passed as argument, preventing injection
+    const commitResult = gitSync(['commit', '-m', message], directory);
+    if (commitResult.status !== 0) {
+      return { success: false, error: commitResult.stderr || 'Failed to create commit' };
+    }
 
     // Get commit hash
-    const commitHash = execSync('git rev-parse HEAD', {
-      cwd: directory,
-      encoding: 'utf-8',
-    }).trim();
+    const hashResult = gitSync(['rev-parse', 'HEAD'], directory);
+    const commitHash = hashResult.stdout.trim();
 
     return { success: true, commitHash, filesChanged };
   } catch (e) {
@@ -270,17 +299,17 @@ export async function pushBranch(
   branchName: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    execSync(`git push -u origin ${branchName}`, {
-      cwd: directory,
-      stdio: 'pipe',
-    });
-    return { success: true };
-  } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    // May already be pushed
-    if (message.includes('Everything up-to-date')) {
+    const result = gitSync(['push', '-u', 'origin', branchName], directory);
+    if (result.status === 0) {
       return { success: true };
     }
+    // May already be pushed
+    if (result.stderr.includes('Everything up-to-date')) {
+      return { success: true };
+    }
+    return { success: false, error: result.stderr };
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
     return { success: false, error: message };
   }
 }
@@ -321,13 +350,22 @@ export async function createPullRequest(
     writeFileSync(bodyFile, body, 'utf-8');
 
     try {
-      const prUrl = execSync(
-        `gh pr create --title "${title.replace(/"/g, '\\"')}" --body-file "${bodyFile}" --base ${baseBranch}`,
-        {
-          cwd: directory,
-          encoding: 'utf-8',
+      // Use array syntax to prevent injection
+      const result = ghSync(
+        ['pr', 'create', '--title', title, '--body-file', bodyFile, '--base', baseBranch],
+        directory
+      );
+
+      if (result.status !== 0) {
+        const message = result.stderr;
+        // Check if PR already exists
+        if (message.includes('already exists')) {
+          return { success: false, error: 'A pull request already exists for this branch' };
         }
-      ).trim();
+        return { success: false, error: message };
+      }
+
+      const prUrl = result.stdout.trim();
 
       // Extract PR number from URL
       const prNumberMatch = prUrl.match(/\/pull\/(\d+)$/);
@@ -359,11 +397,11 @@ export async function createPullRequest(
  */
 export function getCommitCount(directory: string, baseBranch: string = 'main'): number {
   try {
-    const count = execSync(`git rev-list --count ${baseBranch}..HEAD`, {
-      cwd: directory,
-      encoding: 'utf-8',
-    }).trim();
-    return parseInt(count, 10) || 0;
+    const result = gitSync(['rev-list', '--count', `${baseBranch}..HEAD`], directory);
+    if (result.status === 0) {
+      return parseInt(result.stdout.trim(), 10) || 0;
+    }
+    return 0;
   } catch {
     return 0;
   }
@@ -374,11 +412,12 @@ export function getCommitCount(directory: string, baseBranch: string = 'main'): 
  */
 export function getChangedFilesCount(directory: string, baseBranch: string = 'main'): number {
   try {
-    const files = execSync(`git diff --name-only ${baseBranch}...HEAD`, {
-      cwd: directory,
-      encoding: 'utf-8',
-    }).trim();
-    return files ? files.split('\n').filter(Boolean).length : 0;
+    const result = gitSync(['diff', '--name-only', `${baseBranch}...HEAD`], directory);
+    if (result.status === 0) {
+      const files = result.stdout.trim();
+      return files ? files.split('\n').filter(Boolean).length : 0;
+    }
+    return 0;
   } catch {
     return 0;
   }
