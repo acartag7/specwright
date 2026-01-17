@@ -443,6 +443,7 @@ export interface LiveSession {
 export interface SpecStudioState {
   id: string;
   projectId: string;
+  specId?: string;
   step: SpecStudioStep;
   intent: string;
   questions: Question[];

@@ -64,10 +64,11 @@ CREATE TABLE IF NOT EXISTS chunk_tool_calls (
   FOREIGN KEY (chunk_id) REFERENCES chunks(id) ON DELETE CASCADE
 );
 
--- Spec Studio State (for wizard persistence)
+-- Spec Studio State (for wizard persistence, one per project+spec combination)
 CREATE TABLE IF NOT EXISTS spec_studio_state (
   id TEXT PRIMARY KEY,
-  project_id TEXT NOT NULL UNIQUE,
+  project_id TEXT NOT NULL,
+  spec_id TEXT,
   step TEXT NOT NULL DEFAULT 'intent',
   intent TEXT DEFAULT '',
   questions TEXT DEFAULT '[]',
@@ -76,7 +77,9 @@ CREATE TABLE IF NOT EXISTS spec_studio_state (
   suggested_chunks TEXT DEFAULT '[]',
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
-  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+  FOREIGN KEY (spec_id) REFERENCES specs(id) ON DELETE CASCADE,
+  UNIQUE(project_id, spec_id)
 );
 
 -- Indexes
@@ -378,10 +381,11 @@ export const MIGRATIONS_CASCADE_DELETE = [
   `ALTER TABLE chunk_tool_calls_new RENAME TO chunk_tool_calls`,
   `CREATE INDEX IF NOT EXISTS idx_chunk_tool_calls_chunk ON chunk_tool_calls(chunk_id)`,
 
-  // Recreate spec_studio_state table with cascade delete
+  // Recreate spec_studio_state table with cascade delete and spec_id column
   `CREATE TABLE IF NOT EXISTS spec_studio_state_new (
     id TEXT PRIMARY KEY,
-    project_id TEXT NOT NULL UNIQUE,
+    project_id TEXT NOT NULL,
+    spec_id TEXT,
     step TEXT NOT NULL DEFAULT 'intent',
     intent TEXT DEFAULT '',
     questions TEXT DEFAULT '[]',
@@ -390,14 +394,17 @@ export const MIGRATIONS_CASCADE_DELETE = [
     suggested_chunks TEXT DEFAULT '[]',
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
-    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    FOREIGN KEY (spec_id) REFERENCES specs(id) ON DELETE CASCADE,
+    UNIQUE(project_id, spec_id)
   )`,
-  `INSERT INTO spec_studio_state_new (id, project_id, step, intent, questions, answers, generated_spec, suggested_chunks, created_at, updated_at)
-   SELECT id, project_id, step, intent, questions, answers, generated_spec, suggested_chunks, created_at, updated_at
+  `INSERT INTO spec_studio_state_new (id, project_id, spec_id, step, intent, questions, answers, generated_spec, suggested_chunks, created_at, updated_at)
+   SELECT id, project_id, NULL, step, intent, questions, answers, generated_spec, suggested_chunks, created_at, updated_at
    FROM spec_studio_state WHERE project_id IN (SELECT id FROM projects)`,
   `DROP TABLE spec_studio_state`,
   `ALTER TABLE spec_studio_state_new RENAME TO spec_studio_state`,
   `CREATE INDEX IF NOT EXISTS idx_studio_project ON spec_studio_state(project_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_studio_spec ON spec_studio_state(spec_id)`,
 
   // Workers and worker_queue already have cascade in their creation migration,
   // but recreate them for databases that created them before cascade was added
