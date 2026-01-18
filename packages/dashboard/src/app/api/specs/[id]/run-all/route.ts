@@ -200,7 +200,13 @@ export async function POST(_request: Request, context: RouteContext) {
 
         // Error events
         onError: (id, message) => {
-          sendEvent(controller, encoder, isClosedRef, 'error', { chunkId: id, message });
+          // Distinguish spec-level errors (id === specId) from chunk-level errors
+          const isSpecLevel = id === specId;
+          sendEvent(controller, encoder, isClosedRef, 'error', {
+            specId: isSpecLevel ? id : undefined,
+            chunkId: isSpecLevel ? undefined : id,
+            message,
+          });
         },
       };
 

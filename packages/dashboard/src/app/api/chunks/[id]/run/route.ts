@@ -52,25 +52,28 @@ export async function POST(_request: Request, context: RouteContext) {
       // Continue without git
     }
 
-    // Run chunk through pipeline
-    const result = await chunkPipeline.execute(chunkId, gitState, {
-      onToolCall: (id, toolCall) => {
-        console.log(`[Execution] Tool call: ${toolCall.tool}`);
-      },
-      onValidationComplete: (id, validation) => {
-        console.log(`[Execution] Validation: ${validation.filesChanged} files changed`);
-      },
-      onReviewComplete: (id, review) => {
-        console.log(`[Execution] Review: ${review.status}`);
-      },
-      onCommit: (id, hash) => {
-        console.log(`[Execution] Committed: ${hash}`);
-      },
-    });
-
-    // Cleanup git state
-    if (gitState) {
-      await gitService.cleanup(gitState);
+    // Run chunk through pipeline (with guaranteed cleanup)
+    let result;
+    try {
+      result = await chunkPipeline.execute(chunkId, gitState, {
+        onToolCall: (id, toolCall) => {
+          console.log(`[Execution] Tool call: ${toolCall.tool}`);
+        },
+        onValidationComplete: (id, validation) => {
+          console.log(`[Execution] Validation: ${validation.filesChanged} files changed`);
+        },
+        onReviewComplete: (id, review) => {
+          console.log(`[Execution] Review: ${review.status}`);
+        },
+        onCommit: (id, hash) => {
+          console.log(`[Execution] Committed: ${hash}`);
+        },
+      });
+    } finally {
+      // Cleanup git state (always runs)
+      if (gitState) {
+        await gitService.cleanup(gitState);
+      }
     }
 
     return NextResponse.json({

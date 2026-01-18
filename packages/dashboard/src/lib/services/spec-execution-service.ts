@@ -92,32 +92,12 @@ export class SpecExecutionService {
     // Mark as active
     activeSpecs.set(specId, { aborted: false });
 
-    // Get project for git operations
-    const project = getProject(spec.projectId);
-    if (!project) {
-      events?.onError?.(specId, 'Project not found');
-      activeSpecs.delete(specId);
-      return;
-    }
-
-    // Get all chunks
-    const allChunks = getChunksBySpec(specId);
-    const pendingChunks = allChunks.filter(
-      (c) => c.status === 'pending' || c.status === 'failed' || c.status === 'cancelled'
-    );
-
-    if (pendingChunks.length === 0) {
-      events?.onError?.(specId, 'No pending chunks to execute');
-      activeSpecs.delete(specId);
-      return;
-    }
-
-    // Update spec status
-    updateSpec(specId, { status: 'running' });
+    // Track git state for cleanup
+    let gitState: GitWorkflowState | undefined;
 
     // Track execution stats
     const stats: SpecExecutionStats = {
-      totalChunks: pendingChunks.length,
+      totalChunks: 0,
       passedChunks: 0,
       failedChunks: 0,
       skippedChunks: 0,
@@ -125,198 +105,236 @@ export class SpecExecutionService {
       durationMs: 0,
     };
 
-    // Initialize git workflow
-    let gitState: GitWorkflowState | undefined;
-    try {
-      gitState = await gitService.initWorkflow(specId, project.directory);
-      if (gitState.enabled) {
-        events?.onGitWorkflowInit?.(gitState);
-        console.log(`[Execution] Git workflow initialized: ${gitState.specBranch}`);
-      }
-    } catch (error) {
-      console.error('[Execution] Git workflow init failed:', error);
-      // Continue without git - not a fatal error
-    }
-
-    events?.onSpecStart?.(specId, pendingChunks.length);
-
-    // Track completed and failed chunks for dependency resolution
-    const completedIds = new Set<string>();
-    const failedIds = new Set<string>();
-
-    // Initialize completed set with already-completed chunks that passed review
-    for (const chunk of allChunks) {
-      if (chunk.status === 'completed') {
-        if (chunk.reviewStatus === 'pass' || !chunk.reviewStatus) {
-          completedIds.add(chunk.id);
-        }
-      }
-    }
-
-    let currentIndex = 0;
     let hasFailure = false;
     let stopReason: string | null = null;
+    let wasAborted = false;
 
-    // Main execution loop
-    while (!hasFailure && !stopReason) {
-      // Check for abort
-      if (this.isAborted(specId)) {
-        stopReason = 'Aborted by user';
-        break;
+    try {
+      // Get project for git operations
+      const project = getProject(spec.projectId);
+      if (!project) {
+        events?.onError?.(specId, 'Project not found');
+        return;
       }
 
-      // Refresh chunks from DB
-      const currentChunks = getChunksBySpec(specId);
+      // Get all chunks
+      const allChunks = getChunksBySpec(specId);
+      const pendingChunks = allChunks.filter(
+        (c) => c.status === 'pending' || c.status === 'failed' || c.status === 'cancelled'
+      );
 
-      // Find runnable chunks (all dependencies met)
-      const runnableChunks = this.findRunnableChunks(currentChunks, completedIds, failedIds);
-
-      // Check if done
-      if (runnableChunks.length === 0) {
-        break;
+      if (pendingChunks.length === 0) {
+        events?.onError?.(specId, 'No pending chunks to execute');
+        return;
       }
 
-      // Run chunks sequentially (to avoid race conditions with shared state)
-      for (const chunk of runnableChunks) {
-        if (this.isAborted(specId) || hasFailure) {
-          break;
+      // Update stats and spec status
+      stats.totalChunks = pendingChunks.length;
+      updateSpec(specId, { status: 'running' });
+
+      // Initialize git workflow
+      try {
+        gitState = await gitService.initWorkflow(specId, project.directory);
+        if (gitState.enabled) {
+          events?.onGitWorkflowInit?.(gitState);
+          console.log(`[Execution] Git workflow initialized: ${gitState.specBranch}`);
         }
+      } catch (error) {
+        console.error('[Execution] Git workflow init failed:', error);
+        // Continue without git - not a fatal error
+      }
 
-        // Validate dependencies again
-        const depValidation = this.validateDependencies(chunk, currentChunks, completedIds);
-        if (!depValidation.valid) {
-          console.log(`[Execution] Skipping chunk "${chunk.title}": ${depValidation.reason}`);
-          updateChunk(chunk.id, {
-            status: 'cancelled',
-            error: depValidation.reason,
-          });
-          failedIds.add(chunk.id);
-          events?.onDependencyBlocked?.(
-            chunk.id,
-            chunk.title,
-            depValidation.blockingChunkId || '',
-            depValidation.blockingChunkTitle || '',
-            depValidation.reason || ''
-          );
-          this.cancelDependentChunks(chunk.id, chunk.title, 'dependency failed', currentChunks, completedIds, failedIds, events);
-          continue;
-        }
+      events?.onSpecStart?.(specId, pendingChunks.length);
 
-        currentIndex++;
+      // Track completed and failed chunks for dependency resolution
+      const completedIds = new Set<string>();
+      const failedIds = new Set<string>();
 
-        // Run chunk through pipeline
-        const result = await this.runChunkWithRetry(
-          chunk,
-          currentIndex,
-          stats.totalChunks,
-          gitState,
-          events
-        );
-
-        if (result.status === 'cancelled') {
-          stopReason = 'Aborted by user';
-          break;
-        }
-
-        if (result.status === 'pass') {
-          completedIds.add(chunk.id);
-          stats.passedChunks++;
-
-          // Git commit already done in pipeline
-          if (result.commitHash) {
-            events?.onGitCommit?.(chunk.id, result.commitHash);
+      // Initialize completed set with already-completed chunks that passed review
+      for (const chunk of allChunks) {
+        if (chunk.status === 'completed') {
+          if (chunk.reviewStatus === 'pass' || !chunk.reviewStatus) {
+            completedIds.add(chunk.id);
           }
-        } else if (result.status === 'needs_fix' && result.fixChunkId) {
-          // Run the fix chunk
-          stats.fixChunksCreated++;
-          const fixChunk = getChunk(result.fixChunkId);
+        }
+      }
 
-          if (fixChunk) {
-            const fixResult = await this.runChunkWithRetry(
-              fixChunk,
-              currentIndex,
-              stats.totalChunks,
-              gitState,
-              events,
-              true // isFix
+      let currentIndex = 0;
+
+      // Main execution loop
+      while (!hasFailure && !stopReason) {
+        // Check for abort
+        if (this.isAborted(specId)) {
+          stopReason = 'Aborted by user';
+          wasAborted = true;
+          break;
+        }
+
+        // Refresh chunks from DB
+        const currentChunks = getChunksBySpec(specId);
+
+        // Find runnable chunks (all dependencies met)
+        const runnableChunks = this.findRunnableChunks(currentChunks, completedIds, failedIds);
+
+        // Check if done
+        if (runnableChunks.length === 0) {
+          break;
+        }
+
+        // Run chunks sequentially (to avoid race conditions with shared state)
+        for (const chunk of runnableChunks) {
+          if (this.isAborted(specId) || hasFailure) {
+            if (this.isAborted(specId)) {
+              wasAborted = true;
+              stopReason = 'Aborted by user';
+            }
+            break;
+          }
+
+          // Validate dependencies again
+          const depValidation = this.validateDependencies(chunk, currentChunks, completedIds);
+          if (!depValidation.valid) {
+            console.log(`[Execution] Skipping chunk "${chunk.title}": ${depValidation.reason}`);
+            updateChunk(chunk.id, {
+              status: 'cancelled',
+              error: depValidation.reason,
+            });
+            failedIds.add(chunk.id);
+            events?.onDependencyBlocked?.(
+              chunk.id,
+              chunk.title,
+              depValidation.blockingChunkId || '',
+              depValidation.blockingChunkTitle || '',
+              depValidation.reason || ''
             );
+            this.cancelDependentChunks(chunk.id, chunk.title, 'dependency failed', currentChunks, completedIds, failedIds, events);
+            continue;
+          }
 
-            if (fixResult.status === 'pass') {
-              completedIds.add(chunk.id);
-              completedIds.add(result.fixChunkId);
-              stats.passedChunks++;
-            } else {
-              // Fix failed - mark original chunk as failed
-              failedIds.add(chunk.id);
-              stats.failedChunks++;
-              hasFailure = true;
-              stopReason = `Fix chunk "${fixChunk.title}" failed`;
-              this.cancelDependentChunks(chunk.id, chunk.title, 'fix failed', currentChunks, completedIds, failedIds, events);
+          currentIndex++;
+
+          // Run chunk through pipeline
+          const result = await this.runChunkWithRetry(
+            chunk,
+            currentIndex,
+            stats.totalChunks,
+            gitState,
+            events
+          );
+
+          if (result.status === 'cancelled') {
+            stopReason = 'Aborted by user';
+            wasAborted = true;
+            break;
+          }
+
+          if (result.status === 'pass') {
+            completedIds.add(chunk.id);
+            stats.passedChunks++;
+
+            // Git commit already done in pipeline
+            if (result.commitHash) {
+              events?.onGitCommit?.(chunk.id, result.commitHash);
+            }
+          } else if (result.status === 'needs_fix' && result.fixChunkId) {
+            // Run the fix chunk
+            stats.fixChunksCreated++;
+            const fixChunk = getChunk(result.fixChunkId);
+
+            if (fixChunk) {
+              const fixResult = await this.runChunkWithRetry(
+                fixChunk,
+                currentIndex,
+                stats.totalChunks,
+                gitState,
+                events,
+                true // isFix
+              );
+
+              if (fixResult.status === 'pass') {
+                completedIds.add(chunk.id);
+                completedIds.add(result.fixChunkId);
+                stats.passedChunks++;
+              } else {
+                // Fix failed - mark original chunk as failed
+                failedIds.add(chunk.id);
+                stats.failedChunks++;
+                hasFailure = true;
+                stopReason = `Fix chunk "${fixChunk.title}" failed`;
+                this.cancelDependentChunks(chunk.id, chunk.title, 'fix failed', currentChunks, completedIds, failedIds, events);
+              }
+            }
+          } else {
+            // Chunk failed
+            failedIds.add(chunk.id);
+            stats.failedChunks++;
+            hasFailure = true;
+            stopReason = `Chunk "${chunk.title}" failed: ${result.error || result.reviewFeedback}`;
+            this.cancelDependentChunks(chunk.id, chunk.title, 'failed', currentChunks, completedIds, failedIds, events);
+          }
+        }
+      }
+
+      // Handle abortion
+      if (wasAborted) {
+        events?.onSpecAborted?.(specId, stopReason || 'Aborted by user');
+        updateSpec(specId, { status: 'review' });
+        return;
+      }
+
+      // Final review if all chunks passed
+      if (!hasFailure && stats.passedChunks === stats.totalChunks) {
+        const finalReviewResult = await this.runFinalReview(specId, gitState, stats, events);
+
+        if (finalReviewResult.status === 'pass') {
+          // Push and create PR
+          if (gitState?.enabled && spec) {
+            const prResult = await gitService.pushAndCreatePR(gitState, spec, stats.passedChunks);
+            if (prResult.success && prResult.prUrl) {
+              stats.prUrl = prResult.prUrl;
+              stats.prNumber = prResult.prNumber;
+              updateSpec(specId, { prUrl: prResult.prUrl, prNumber: prResult.prNumber });
+              events?.onGitPush?.(gitState.specBranch || '');
+              events?.onPRCreated?.(prResult.prUrl, prResult.prNumber);
             }
           }
+          updateSpec(specId, { status: 'completed' });
+        } else if (finalReviewResult.status === 'needs_fix' && finalReviewResult.fixChunks) {
+          // Create fix chunks and re-run
+          const fixChunkIds = await this.createFinalReviewFixChunks(specId, finalReviewResult.fixChunks);
+          stats.fixChunksCreated += fixChunkIds.length;
+          events?.onFinalReviewFixChunks?.(specId, fixChunkIds);
+          updateSpec(specId, { status: 'review' });
         } else {
-          // Chunk failed
-          failedIds.add(chunk.id);
-          stats.failedChunks++;
-          hasFailure = true;
-          stopReason = `Chunk "${chunk.title}" failed: ${result.error || result.reviewFeedback}`;
-          this.cancelDependentChunks(chunk.id, chunk.title, 'failed', currentChunks, completedIds, failedIds, events);
+          updateSpec(specId, { status: 'review' });
         }
-      }
-    }
-
-    // Handle abortion
-    if (this.isAborted(specId)) {
-      events?.onSpecAborted?.(specId, stopReason || 'Aborted by user');
-      updateSpec(specId, { status: 'review' });
-      await gitService.cleanup(gitState!);
-      activeSpecs.delete(specId);
-      return;
-    }
-
-    // Final review if all chunks passed
-    if (!hasFailure && stats.passedChunks === stats.totalChunks) {
-      const finalReviewResult = await this.runFinalReview(specId, gitState, stats, events);
-
-      if (finalReviewResult.status === 'pass') {
-        // Push and create PR
-        if (gitState?.enabled && spec) {
-          const prResult = await gitService.pushAndCreatePR(gitState, spec, stats.passedChunks);
-          if (prResult.success && prResult.prUrl) {
-            stats.prUrl = prResult.prUrl;
-            stats.prNumber = prResult.prNumber;
-            updateSpec(specId, { prUrl: prResult.prUrl, prNumber: prResult.prNumber });
-            events?.onGitPush?.(gitState.specBranch || '');
-            events?.onPRCreated?.(prResult.prUrl, prResult.prNumber);
-          }
-        }
-        updateSpec(specId, { status: 'completed' });
-      } else if (finalReviewResult.status === 'needs_fix' && finalReviewResult.fixChunks) {
-        // Create fix chunks and re-run
-        const fixChunkIds = await this.createFinalReviewFixChunks(specId, finalReviewResult.fixChunks);
-        stats.fixChunksCreated += fixChunkIds.length;
-        events?.onFinalReviewFixChunks?.(specId, fixChunkIds);
-        updateSpec(specId, { status: 'review' });
       } else {
         updateSpec(specId, { status: 'review' });
       }
-    } else {
-      updateSpec(specId, { status: 'review' });
+
+      // Log analytics
+      stats.durationMs = Date.now() - startTime;
+      console.log('[Execution] Spec execution analytics:', {
+        specId,
+        specTitle: spec.title,
+        ...stats,
+        durationMinutes: (stats.durationMs / 60000).toFixed(2),
+      });
+
+      events?.onSpecComplete?.(specId, stats);
+    } finally {
+      // Always cleanup git state if defined
+      if (gitState) {
+        try {
+          await gitService.cleanup(gitState);
+        } catch (cleanupError) {
+          console.error('[Execution] Git cleanup failed:', cleanupError);
+        }
+      }
+
+      // Always remove from active specs
+      activeSpecs.delete(specId);
     }
-
-    // Cleanup
-    stats.durationMs = Date.now() - startTime;
-    await gitService.cleanup(gitState!);
-
-    console.log('[Execution] Spec execution analytics:', {
-      specId,
-      specTitle: spec.title,
-      ...stats,
-      durationMinutes: (stats.durationMs / 60000).toFixed(2),
-    });
-
-    events?.onSpecComplete?.(specId, stats);
-    activeSpecs.delete(specId);
   }
 
   /**

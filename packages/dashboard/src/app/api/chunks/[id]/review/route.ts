@@ -39,9 +39,14 @@ export async function POST(_request: Request, context: RouteContext) {
       return NextResponse.json({ error: 'Spec not found' }, { status: 404 });
     }
 
-    // Get project-specific review service
+    // Get project
     const project = getProject(spec.projectId);
-    const reviewSvc = createReviewService(project?.id);
+    if (!project) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+    }
+
+    // Get project-specific review service
+    const reviewSvc = createReviewService(project.id);
 
     console.log(`[Review] Starting review for chunk: ${chunk.title}`);
 
