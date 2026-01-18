@@ -22,7 +22,11 @@ import type { ValidationResult } from './validation-service';
 import type { ChunkReviewResult } from '../review';
 
 // Track active run-all sessions
-const activeSpecs = new Map<string, { aborted: boolean }>();
+interface ActiveSession {
+  aborted: boolean;
+  currentChunkId?: string;
+}
+const activeSpecs = new Map<string, ActiveSession>();
 
 export interface SpecExecutionEvents extends Omit<ChunkPipelineEvents, 'onExecutionStart' | 'onExecutionComplete'> {
   // Spec-level events
@@ -219,6 +223,7 @@ export class SpecExecutionService {
               error: depValidation.reason,
             });
             failedIds.add(chunk.id);
+            stats.skippedChunks++;
             events?.onDependencyBlocked?.(
               chunk.id,
               chunk.title,
@@ -226,7 +231,7 @@ export class SpecExecutionService {
               depValidation.blockingChunkTitle || '',
               depValidation.reason || ''
             );
-            this.cancelDependentChunks(chunk.id, chunk.title, 'dependency failed', currentChunks, completedIds, failedIds, events);
+            this.cancelDependentChunks(chunk.id, chunk.title, 'dependency failed', currentChunks, completedIds, failedIds, stats, events);
             continue;
           }
 
@@ -235,6 +240,7 @@ export class SpecExecutionService {
           // Run chunk through pipeline
           const result = await this.runChunkWithRetry(
             chunk,
+            specId,
             currentIndex,
             stats.totalChunks,
             gitState,
@@ -256,14 +262,25 @@ export class SpecExecutionService {
               events?.onGitCommit?.(chunk.id, result.commitHash);
             }
           } else if (result.status === 'needs_fix' && result.fixChunkId) {
-            // Run the fix chunk
-            stats.fixChunksCreated++;
-            stats.totalChunks++; // Count fix chunk in total for consistent bookkeeping
+            // Run the fix chunk - first verify it exists
             const fixChunk = getChunk(result.fixChunkId);
 
-            if (fixChunk) {
+            if (!fixChunk) {
+              // Fix chunk doesn't exist - treat as hard failure
+              console.error(`[Execution] Fix chunk not found: ${result.fixChunkId}`);
+              failedIds.add(chunk.id);
+              stats.failedChunks++;
+              hasFailure = true;
+              stopReason = `Fix chunk not found: ${result.fixChunkId}`;
+              this.cancelDependentChunks(chunk.id, chunk.title, 'missing fix chunk', currentChunks, completedIds, failedIds, stats, events);
+            } else {
+              // Fix chunk exists - now increment counts
+              stats.fixChunksCreated++;
+              stats.totalChunks++; // Count fix chunk in total for consistent bookkeeping
+
               const fixResult = await this.runChunkWithRetry(
                 fixChunk,
+                specId,
                 currentIndex,
                 stats.totalChunks,
                 gitState,
@@ -283,7 +300,7 @@ export class SpecExecutionService {
                 stats.failedChunks += 2;
                 hasFailure = true;
                 stopReason = `Fix chunk "${fixChunk.title}" failed`;
-                this.cancelDependentChunks(chunk.id, chunk.title, 'fix failed', currentChunks, completedIds, failedIds, events);
+                this.cancelDependentChunks(chunk.id, chunk.title, 'fix failed', currentChunks, completedIds, failedIds, stats, events);
               }
             }
           } else {
@@ -292,7 +309,7 @@ export class SpecExecutionService {
             stats.failedChunks++;
             hasFailure = true;
             stopReason = `Chunk "${chunk.title}" failed: ${result.error || result.reviewFeedback}`;
-            this.cancelDependentChunks(chunk.id, chunk.title, 'failed', currentChunks, completedIds, failedIds, events);
+            this.cancelDependentChunks(chunk.id, chunk.title, 'failed', currentChunks, completedIds, failedIds, stats, events);
           }
         }
       }
@@ -357,6 +374,20 @@ export class SpecExecutionService {
       });
 
       events?.onSpecComplete?.(specId, stats);
+    } catch (error) {
+      // Handle unexpected exceptions - ensure proper cleanup and client notification
+      stats.durationMs = Date.now() - startTime;
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('[Execution] Spec execution failed with exception:', {
+        specId,
+        specTitle: spec.title,
+        ...stats,
+        durationMinutes: (stats.durationMs / 60000).toFixed(2),
+        error: errorMessage,
+      });
+      events?.onError?.(specId, errorMessage);
+      events?.onSpecComplete?.(specId, stats);
+      updateSpec(specId, { status: 'review' });
     } finally {
       // Always cleanup git state if defined
       if (gitState) {
@@ -380,6 +411,14 @@ export class SpecExecutionService {
     if (session) {
       session.aborted = true;
       console.log(`[Execution] Aborting spec: ${specId}`);
+
+      // Also abort the currently running chunk if any
+      if (session.currentChunkId) {
+        console.log(`[Execution] Aborting in-flight chunk: ${session.currentChunkId}`);
+        chunkPipeline.abort(session.currentChunkId).catch((err) => {
+          console.error('[Execution] Failed to abort chunk:', err);
+        });
+      }
     }
   }
 
@@ -402,6 +441,7 @@ export class SpecExecutionService {
    */
   private async runChunkWithRetry(
     chunk: Chunk,
+    specId: string,
     index: number,
     total: number,
     gitState?: GitWorkflowState,
@@ -420,7 +460,21 @@ export class SpecExecutionService {
       onError: (chunkId, error) => events?.onError?.(chunkId, error),
     };
 
-    const result = await chunkPipeline.execute(chunk.id, gitState, pipelineEvents);
+    // Track current chunk for abort support
+    const session = activeSpecs.get(specId);
+    if (session) {
+      session.currentChunkId = chunk.id;
+    }
+
+    let result: ChunkPipelineResult;
+    try {
+      result = await chunkPipeline.execute(chunk.id, gitState, pipelineEvents);
+    } finally {
+      // Clear current chunk tracking
+      if (session) {
+        session.currentChunkId = undefined;
+      }
+    }
 
     // Git reset on failure
     if (result.status !== 'pass' && result.status !== 'cancelled' && gitState?.enabled) {
@@ -512,6 +566,7 @@ export class SpecExecutionService {
     allChunks: Chunk[],
     completedIds: Set<string>,
     failedIds: Set<string>,
+    stats: SpecExecutionStats,
     events?: SpecExecutionEvents
   ): void {
     const dependents = this.findDependentChunks(chunkId, allChunks);
@@ -523,6 +578,7 @@ export class SpecExecutionService {
           error: `Blocked: ${chunkTitle} ${reason}`,
         });
         failedIds.add(dep.id);
+        stats.skippedChunks++;
         events?.onDependencyBlocked?.(dep.id, dep.title, chunkId, chunkTitle, reason);
       }
     }
