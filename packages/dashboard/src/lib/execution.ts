@@ -10,6 +10,7 @@ import { DEFAULT_PROJECT_CONFIG, DEFAULT_CHUNK_TIMEOUT_MS } from '@specwright/sh
 import { getChunk, updateChunk, createToolCall, updateToolCall, getProject, getSpec, getChunksBySpec } from './db';
 import { buildPromptForChunk } from './prompt-builder';
 import { generateChunkSummary, generateQuickSummary } from './summary-generator';
+import { gitSync } from './git';
 
 const MAX_BUFFER_SIZE = 1000; // Maximum events to buffer for late subscribers
 
@@ -499,6 +500,71 @@ function handleToolCall(chunkId: string, toolCall: ToolCallEvent): void {
   });
 }
 
+/**
+ * Result of validating file changes in worktree
+ */
+interface ChangeValidation {
+  hasChanges: boolean;
+  filesChanged: number;
+  additions: number;
+  deletions: number;
+  onlyWhitespace: boolean;
+}
+
+/**
+ * Validate that actual file changes were made during chunk execution
+ * This prevents marking chunks as "completed" when no work was done
+ */
+function validateFileChanges(directory: string): ChangeValidation {
+  // Get git status for changed files
+  const statusResult = gitSync(['status', '--porcelain'], directory);
+  const porcelain = statusResult.status === 0 ? statusResult.stdout.trim() : '';
+
+  // If no changes at all, return early
+  if (!porcelain) {
+    return {
+      hasChanges: false,
+      filesChanged: 0,
+      additions: 0,
+      deletions: 0,
+      onlyWhitespace: false,
+    };
+  }
+
+  const filesChanged = porcelain.split('\n').filter(Boolean).length;
+
+  // Get diff to check for whitespace-only changes
+  const diffResult = gitSync(['diff'], directory);
+  const diff = diffResult.status === 0 ? diffResult.stdout : '';
+
+  // Also check staged diff
+  const stagedDiffResult = gitSync(['diff', '--staged'], directory);
+  const stagedDiff = stagedDiffResult.status === 0 ? stagedDiffResult.stdout : '';
+
+  const fullDiff = diff + stagedDiff;
+
+  // Count actual content changes (ignore whitespace-only lines)
+  const diffLines = fullDiff.split('\n');
+  const contentChanges = diffLines
+    .filter(line => line.startsWith('+') || line.startsWith('-'))
+    .filter(line => !line.startsWith('+++') && !line.startsWith('---'))
+    .filter(line => line.slice(1).trim().length > 0); // Has non-whitespace content
+
+  const additions = contentChanges.filter(l => l.startsWith('+')).length;
+  const deletions = contentChanges.filter(l => l.startsWith('-')).length;
+
+  // Only whitespace if we have changes but no meaningful content
+  const onlyWhitespace = filesChanged > 0 && contentChanges.length === 0;
+
+  return {
+    hasChanges: filesChanged > 0,
+    filesChanged,
+    additions,
+    deletions,
+    onlyWhitespace,
+  };
+}
+
 // Helper: Handle timeout
 function handleTimeout(chunkId: string): void {
   const execution = activeExecutions.get(chunkId);
@@ -512,10 +578,54 @@ function handleError(chunkId: string, message: string): void {
   cleanup(chunkId, 'failed', message);
 }
 
-// Helper: Handle completion
+// Helper: Handle completion with file change validation
 function handleComplete(chunkId: string): void {
   const execution = activeExecutions.get(chunkId);
   const output = execution?.textOutput || 'Task completed';
+
+  // Get chunk info for logging
+  const chunk = getChunk(chunkId);
+
+  // Validate that actual file changes were made
+  const validation = validateFileChanges(execution?.directory || '');
+
+  // Log validation results for analytics
+  console.log('[EXECUTION VALIDATION]', {
+    chunkId,
+    specId: chunk?.specId,
+    chunkTitle: chunk?.title,
+    hasChanges: validation.hasChanges,
+    filesChanged: validation.filesChanged,
+    additions: validation.additions,
+    deletions: validation.deletions,
+    onlyWhitespace: validation.onlyWhitespace,
+    outcome: validation.hasChanges && !validation.onlyWhitespace ? 'completed' : 'failed',
+    timestamp: new Date().toISOString(),
+  });
+
+  // No changes detected - mark as failed
+  if (!validation.hasChanges) {
+    cleanup(
+      chunkId,
+      'failed',
+      'Execution completed but no file changes detected. The AI may have misunderstood the task or encountered an error.',
+      output
+    );
+    return;
+  }
+
+  // Only whitespace changes - mark as failed
+  if (validation.onlyWhitespace) {
+    cleanup(
+      chunkId,
+      'failed',
+      'Execution completed but only whitespace changes detected. No meaningful code changes were made.',
+      output
+    );
+    return;
+  }
+
+  // Valid changes - mark as completed
   cleanup(chunkId, 'completed', undefined, output);
 }
 
