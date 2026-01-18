@@ -186,6 +186,27 @@ export default function SpecWorkspace() {
     }
   }, [abortChunk, executionState.chunkId, specId]);
 
+  // Handle stopping a specific chunk from ChunkList
+  const handleStopChunk = useCallback(async (chunk: Chunk) => {
+    try {
+      const res = await fetch(`/api/chunks/${chunk.id}/abort`, { method: 'POST' });
+      const data = await res.json();
+
+      if (data.success) {
+        // Refresh chunks to show cancelled status
+        const response = await fetch(`/api/specs/${specId}/chunks`);
+        if (response.ok) {
+          const updatedChunks = await response.json();
+          setChunks(updatedChunks);
+        }
+      } else {
+        console.error('Failed to stop chunk:', data.error);
+      }
+    } catch (err) {
+      console.error('Failed to stop chunk:', err);
+    }
+  }, [specId]);
+
   // Sync chunk status from execution state
   useEffect(() => {
     if (executionState.chunkId && executionState.status) {
@@ -607,6 +628,7 @@ export default function SpecWorkspace() {
               onChunksChange={handleChunksChange}
               onRunChunk={handleRunChunk}
               onSelectChunk={handleSelectChunk}
+              onStopChunk={handleStopChunk}
               runningChunkId={executionState.chunkId}
               selectedChunkId={selectedChunk?.id}
             />

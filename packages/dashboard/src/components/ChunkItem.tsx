@@ -18,6 +18,7 @@ interface ChunkItemProps {
   onRun: () => void;
   onClick?: () => void;
   onEditDependencies?: () => void;
+  onStop?: () => void;
 }
 
 const statusConfig = {
@@ -107,6 +108,7 @@ export default function ChunkItem({
   onRun,
   onClick,
   onEditDependencies,
+  onStop,
 }: ChunkItemProps) {
   const [showReviewFeedback, setShowReviewFeedback] = useState(false);
 
@@ -349,8 +351,13 @@ export default function ChunkItem({
           )}
 
           {/* Stop (when running) */}
-          {chunk.status === 'running' && (
+          {chunk.status === 'running' && onStop && (
             <button
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                onStop();
+              }}
               className="p-1 text-red-500 hover:text-red-400 hover:bg-neutral-800 rounded transition-colors"
               title="Stop"
             >

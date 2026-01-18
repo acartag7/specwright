@@ -7,3 +7,4 @@ export { validationService, ValidationService, type ValidationResult, type Valid
 export { reviewService, ReviewService, createReviewService, type ChunkReviewResult, type FinalReviewResult, type ErrorType } from './review-service';
 export { chunkExecutor, ChunkExecutor, type ExecutionResult, type ExecutionCallbacks } from './chunk-executor';
 export { chunkPipeline, ChunkPipeline, type ChunkPipelineResult, type ChunkPipelineEvents } from './chunk-pipeline';
+export { opencodeManager, OpencodeManager, type OpencodeStatus, type OpencodeManagerConfig } from './opencode-manager';
