@@ -1,6 +1,7 @@
 'use client';
 
-import type { ChunkToolCall, ReviewStatus } from '@specwright/shared';
+import type { ChunkToolCall, ReviewStatus, ReviewWarning } from '@specwright/shared';
+import ReviewWarnings from './ReviewWarnings';
 
 interface ChunkStatus {
   chunkId: string;
@@ -27,6 +28,8 @@ interface RunAllProgressPanelProps {
   error: string | null;
   onStop: () => void;
   onClose: () => void;
+  reviewWarnings?: ReviewWarning[];
+  onDismissWarnings?: () => void;
 }
 
 export default function RunAllProgressPanel({
@@ -38,6 +41,8 @@ export default function RunAllProgressPanel({
   error,
   onStop,
   onClose,
+  reviewWarnings,
+  onDismissWarnings,
 }: RunAllProgressPanelProps) {
   // Get current chunk
   const currentChunk = chunkStatuses.find(
@@ -87,7 +92,7 @@ export default function RunAllProgressPanel({
       case 'executing':
         return 'Executing...';
       case 'reviewing':
-        return 'Reviewing with Opus...';
+        return 'Reviewing with Haiku...';
       case 'fix':
         return 'Running fix chunk...';
     }
@@ -155,6 +160,13 @@ export default function RunAllProgressPanel({
           <span className="text-neutral-200">{progress.fixes}</span>
         </div>
       </div>
+
+      {/* Review Warnings */}
+      {reviewWarnings && reviewWarnings.length > 0 && (
+        <div className="px-3 py-2 border-b border-neutral-800">
+          <ReviewWarnings warnings={reviewWarnings} onDismiss={onDismissWarnings} />
+        </div>
+      )}
 
       {/* Error */}
       {error && (

@@ -62,6 +62,8 @@ const reviewStatusColors: Record<ReviewStatus, { bg: string; text: string; icon:
   pass: { bg: 'bg-emerald-900/30', text: 'text-emerald-400', icon: '✓' },
   needs_fix: { bg: 'bg-amber-900/30', text: 'text-amber-400', icon: '⚠' },
   fail: { bg: 'bg-red-900/30', text: 'text-red-400', icon: '✕' },
+  error: { bg: 'bg-orange-900/30', text: 'text-orange-400', icon: '⚡' },
+  skipped: { bg: 'bg-neutral-800/50', text: 'text-neutral-500', icon: '—' },
 };
 
 export default function ExecutionPanel({

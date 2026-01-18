@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import type { Chunk, ReviewStatus } from '@specwright/shared';
 
 interface ChunkItemProps {
@@ -52,21 +53,36 @@ const statusConfig = {
   },
 };
 
-const reviewConfig: Record<ReviewStatus, { icon: string; color: string; label: string }> = {
+const reviewConfig: Record<ReviewStatus, { icon: string; color: string; bg: string; label: string }> = {
   pass: {
     icon: '✓',
     color: 'text-emerald-400',
+    bg: 'bg-emerald-900/20',
     label: 'Passed',
   },
   needs_fix: {
     icon: '⚠',
     color: 'text-amber-400',
+    bg: 'bg-amber-900/20',
     label: 'Needs Fix',
   },
   fail: {
     icon: '✕',
     color: 'text-red-400',
+    bg: 'bg-red-900/20',
     label: 'Failed',
+  },
+  error: {
+    icon: '⚡',
+    color: 'text-orange-400',
+    bg: 'bg-orange-900/20',
+    label: 'Error',
+  },
+  skipped: {
+    icon: '—',
+    color: 'text-neutral-500',
+    bg: 'bg-neutral-800/50',
+    label: 'Skipped',
   },
 };
 
@@ -92,6 +108,8 @@ export default function ChunkItem({
   onClick,
   onEditDependencies,
 }: ChunkItemProps) {
+  const [showReviewFeedback, setShowReviewFeedback] = useState(false);
+
   const status = statusConfig[chunk.status];
   const canRun = chunk.status === 'pending' || chunk.status === 'failed' || chunk.status === 'cancelled';
 
@@ -113,6 +131,20 @@ export default function ChunkItem({
       status: dep?.status || 'pending',
     };
   });
+
+  // Fix chunk relationship detection
+  // Fix chunks have exactly 1 dependency and title indicates fix
+  const isFixChunk = chunk.dependencies.length === 1 &&
+    chunk.title.toLowerCase().includes('fix');
+  const fixesChunkId = isFixChunk ? chunk.dependencies[0] : undefined;
+  const fixesChunk = fixesChunkId && chunkMap ? chunkMap.get(fixesChunkId) : undefined;
+
+  // Find if another chunk fixes this one
+  const fixChunkForThis = chunkMap
+    ? Array.from(chunkMap.values()).find(
+        c => c.dependencies.includes(chunk.id) && c.title.toLowerCase().includes('fix')
+      )
+    : undefined;
 
   return (
     <div
@@ -176,24 +208,59 @@ export default function ChunkItem({
             </div>
           )}
 
+          {/* Fix relationship indicators */}
+          {fixesChunk && (
+            <div className="text-[10px] font-mono text-amber-400 mt-1">
+              ↳ Fixes: {fixesChunk.title.length > 25 ? fixesChunk.title.slice(0, 23) + '...' : fixesChunk.title}
+            </div>
+          )}
+          {fixChunkForThis && (
+            <div className="text-[10px] font-mono text-emerald-400 mt-1">
+              → Fix created: {fixChunkForThis.title.length > 20 ? fixChunkForThis.title.slice(0, 18) + '...' : fixChunkForThis.title}
+            </div>
+          )}
+
           {/* Status info */}
           {chunk.status === 'completed' && chunk.completedAt && (
             <div className="flex items-center gap-2 mt-1.5">
               <p className="text-[10px] text-neutral-600 font-mono">
                 completed {new Date(chunk.completedAt).toLocaleTimeString()}
               </p>
-              {/* Review status indicator */}
+              {/* Review status indicator (clickable) */}
               {chunk.reviewStatus && (
-                <span
-                  className={`text-[10px] font-mono flex items-center gap-1 ${reviewConfig[chunk.reviewStatus].color}`}
-                  title={chunk.reviewFeedback}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    setShowReviewFeedback(!showReviewFeedback);
+                  }}
+                  className={`text-[10px] font-mono flex items-center gap-1 ${reviewConfig[chunk.reviewStatus].color} hover:underline`}
                 >
                   <span>{reviewConfig[chunk.reviewStatus].icon}</span>
                   <span className="lowercase">{reviewConfig[chunk.reviewStatus].label}</span>
-                </span>
+                  <svg
+                    className={`w-2.5 h-2.5 transition-transform ${showReviewFeedback ? 'rotate-180' : ''}`}
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
               )}
             </div>
           )}
+
+          {/* Expandable review feedback panel */}
+          {showReviewFeedback && chunk.reviewFeedback && chunk.reviewStatus && (
+            <div className={`mt-2 p-2 rounded ${reviewConfig[chunk.reviewStatus].bg} border border-neutral-800`}>
+              <p className="text-[10px] text-neutral-400 font-mono whitespace-pre-wrap">
+                {chunk.reviewFeedback}
+              </p>
+              <p className="text-[9px] text-neutral-600 font-mono mt-1">Reviewed with Haiku</p>
+            </div>
+          )}
+
           {chunk.status === 'failed' && chunk.error && (
             <p className="text-[10px] text-red-400 mt-1.5 font-mono truncate">
               error: {chunk.error}

@@ -2,7 +2,7 @@
  * Shared prompt templates for AI review operations
  */
 
-import type { ReviewResult, ReviewStatus } from '@specwright/shared';
+import type { ReviewResult, ReviewResultStatus } from '@specwright/shared';
 
 // Import types inline to avoid circular dependency at runtime
 // The actual validation formatting is done in the validation module
@@ -178,7 +178,7 @@ export function parseReviewResult(text: string): ReviewResult | null {
       return null;
     }
     const result: ReviewResult = {
-      status: parsed.status as ReviewStatus,
+      status: parsed.status as ReviewResultStatus,
       feedback: parsed.feedback || '',
     };
     if (parsed.status === 'needs_fix' && parsed.fixChunk) {
