@@ -47,11 +47,15 @@ export class ChunkExecutor {
 
     if (!startResult.success) {
       console.error(`[ChunkExecutor] Failed to start chunk ${chunkId}: ${startResult.error}`);
+      callbacks?.onStatusChange?.('failed');
       return {
         status: 'failed',
         error: startResult.error,
       };
     }
+
+    // Notify that execution is running
+    callbacks?.onStatusChange?.('running');
 
     // Wait for completion
     const result = await waitForChunkCompletion(
@@ -61,6 +65,9 @@ export class ChunkExecutor {
     );
 
     console.log(`[ChunkExecutor] Chunk ${chunkId} ${result.status}`);
+
+    // Notify final status
+    callbacks?.onStatusChange?.(result.status);
 
     return {
       status: result.status,

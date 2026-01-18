@@ -394,6 +394,43 @@ describe('ChunkPipeline', () => {
       expect(result.status).toBe('error');
       expect(result.error).toBe('Spec not found');
     });
+
+    it('continues with pass status when commit fails', async () => {
+      // Set up all stages to succeed
+      vi.mocked(chunkExecutor.execute).mockResolvedValue({
+        status: 'completed',
+        output: 'Execution output',
+      });
+
+      vi.mocked(validationService.validate).mockResolvedValue({
+        success: true,
+        filesChanged: 1,
+        filesChangedList: ['file.ts'],
+        gitDiff: 'diff',
+        buildResult: { success: true, output: '', exitCode: 0 },
+      });
+
+      vi.mocked(reviewService.reviewChunk).mockResolvedValue({
+        status: 'pass',
+        feedback: 'Looks good',
+      });
+
+      // Mock commit to fail
+      vi.mocked(gitService.commitChunk).mockResolvedValue({
+        success: false,
+        error: 'Commit failed',
+      });
+
+      const result = await pipeline.execute('chunk-1', mockGitState);
+
+      // Pipeline should still pass - commit failure is non-fatal
+      expect(result.status).toBe('pass');
+      expect(result.commitHash).toBeUndefined();
+      expect(result.output).toBe('Execution output');
+
+      // Commit was attempted
+      expect(gitService.commitChunk).toHaveBeenCalled();
+    });
   });
 
   describe('abort', () => {

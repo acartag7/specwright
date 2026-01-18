@@ -5,11 +5,13 @@
  * chunk-pipeline and spec-execution-service.
  */
 
+import { existsSync } from 'fs';
 import type { Spec } from '@specwright/shared';
 import {
   checkGitRepo,
   getCurrentBranch,
   createBranch,
+  checkoutBranch,
   createCommit,
   resetHard,
   pushBranch,
@@ -22,6 +24,7 @@ import {
 } from '../git';
 import { getSpec, updateSpec } from '../db';
 import { getProject } from '../db/projects';
+import { validateProjectPath, validateAndNormalizePath, PathValidationError } from '../path-validation';
 
 export interface GitWorkflowState {
   enabled: boolean;
@@ -54,6 +57,22 @@ export class GitService {
    * - Return workflow state
    */
   async initWorkflow(specId: string, projectDir: string): Promise<GitWorkflowState> {
+    // Validate project path before any git operations
+    try {
+      validateProjectPath(projectDir);
+    } catch (error) {
+      const message = error instanceof PathValidationError ? error.message : 'Invalid project path';
+      console.error(`[Git] Path validation failed: ${message}`);
+      return {
+        enabled: false,
+        projectDir,
+        workingDir: projectDir,
+        isWorktree: false,
+        originalBranch: null,
+        specBranch: null,
+      };
+    }
+
     // Check if this is a git repo
     if (!checkGitRepo(projectDir)) {
       console.log(`[Git] Not a git repo: ${projectDir}`);
@@ -87,15 +106,30 @@ export class GitService {
 
     // Check if spec already has a worktree path
     if (spec.worktreePath) {
-      console.log(`[Git] Using existing worktree: ${spec.worktreePath}`);
-      return {
-        enabled: true,
-        projectDir,
-        workingDir: spec.worktreePath,
-        isWorktree: true,
-        originalBranch,
-        specBranch: spec.branchName || null,
-      };
+      // Validate the worktree path exists and is safe
+      let worktreeValid = false;
+      try {
+        validateAndNormalizePath(spec.worktreePath);
+        worktreeValid = existsSync(spec.worktreePath);
+      } catch {
+        worktreeValid = false;
+      }
+
+      if (worktreeValid) {
+        console.log(`[Git] Using existing worktree: ${spec.worktreePath}`);
+        return {
+          enabled: true,
+          projectDir,
+          workingDir: spec.worktreePath,
+          isWorktree: true,
+          originalBranch,
+          specBranch: spec.branchName || null,
+        };
+      } else {
+        // Worktree path is stale/invalid - clear it and continue to recreation
+        console.warn(`[Git] Stale worktree path detected, clearing: ${spec.worktreePath}`);
+        updateSpec(specId, { worktreePath: undefined });
+      }
     }
 
     // Generate branch name
@@ -242,6 +276,9 @@ export class GitService {
 
   /**
    * Cleanup - switch back to original branch if not using worktree
+   *
+   * For worktree-based workflows, the worktree is preserved for review.
+   * For branch-based workflows, attempts to switch back to the original branch.
    */
   async cleanup(state: GitWorkflowState): Promise<void> {
     if (!state.enabled) return;
@@ -252,8 +289,10 @@ export class GitService {
     } else if (state.originalBranch) {
       // Switch back to original branch
       console.log(`[Git] Switching back to: ${state.originalBranch}`);
-      // Note: We don't use checkoutBranch here to avoid importing it
-      // The caller can handle branch switching if needed
+      const success = checkoutBranch(state.projectDir, state.originalBranch);
+      if (!success) {
+        console.warn(`[Git] Failed to checkout original branch: ${state.originalBranch}`);
+      }
     }
   }
 
