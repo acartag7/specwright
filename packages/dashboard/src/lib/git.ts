@@ -492,12 +492,23 @@ export function getChangedFilesCount(directory: string, baseBranch: string = 'ma
 
 /**
  * Reset working directory to HEAD, discarding all uncommitted changes
+ * Also removes untracked files to prevent orphaned imports from failing builds
  */
 export function resetHard(directory: string): { success: boolean; error?: string } {
-  const result = gitSync(['reset', '--hard', 'HEAD'], directory);
-  if (result.status !== 0) {
-    return { success: false, error: result.stderr };
+  // Reset tracked files to HEAD
+  const resetResult = gitSync(['reset', '--hard', 'HEAD'], directory);
+  if (resetResult.status !== 0) {
+    return { success: false, error: resetResult.stderr };
   }
+
+  // Clean untracked files and directories (ORC-59)
+  // This prevents orphaned files that import types from reverted files
+  const cleanResult = gitSync(['clean', '-fd'], directory);
+  if (cleanResult.status !== 0) {
+    console.warn(`[Git] Warning: git clean failed: ${cleanResult.stderr}`);
+    // Don't fail the overall operation - reset succeeded
+  }
+
   return { success: true };
 }
 

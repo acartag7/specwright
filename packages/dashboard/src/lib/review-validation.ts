@@ -68,8 +68,8 @@ function getGitDiff(directory: string, maxLines: number = 100): string {
  * Run build command in the working directory
  */
 function runBuild(directory: string, timeoutMs: number): { success: boolean; output: string; exitCode: number } {
-  // Try pnpm build first (most common for this project)
-  const result = spawnSync('pnpm', ['build'], {
+  // Use --force to disable turbo caching (worktrees share cache with main repo)
+  const result = spawnSync('pnpm', ['build', '--force'], {
     cwd: directory,
     encoding: 'utf-8',
     shell: false,
