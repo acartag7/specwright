@@ -65,6 +65,93 @@ function findRunnableChunks(
   });
 }
 
+/**
+ * Validate that all dependencies for a chunk are satisfied
+ * A dependency is satisfied if:
+ * 1. The chunk is completed
+ * 2. The chunk passed review (or has no review status for backwards compatibility)
+ */
+function validateDependencies(
+  chunk: Chunk,
+  allChunks: Chunk[],
+  completedIds: Set<string>
+): { valid: boolean; reason?: string; blockingChunkId?: string; blockingChunkTitle?: string } {
+  for (const depId of chunk.dependencies) {
+    const depChunk = allChunks.find(c => c.id === depId);
+
+    if (!depChunk) {
+      return {
+        valid: false,
+        reason: `Dependency chunk ${depId} not found`,
+        blockingChunkId: depId,
+      };
+    }
+
+    // Check if dependency is in completed set (already validated for review status)
+    if (!completedIds.has(depId)) {
+      // Determine the specific reason
+      if (depChunk.status !== 'completed') {
+        return {
+          valid: false,
+          reason: `Dependency "${depChunk.title}" is not completed (status: ${depChunk.status})`,
+          blockingChunkId: depId,
+          blockingChunkTitle: depChunk.title,
+        };
+      }
+
+      // Chunk is completed but not in completedIds - must have failed review
+      if (depChunk.reviewStatus === 'needs_fix') {
+        return {
+          valid: false,
+          reason: `Dependency "${depChunk.title}" needs fixes (review status: needs_fix)`,
+          blockingChunkId: depId,
+          blockingChunkTitle: depChunk.title,
+        };
+      }
+
+      if (depChunk.reviewStatus === 'fail') {
+        return {
+          valid: false,
+          reason: `Dependency "${depChunk.title}" failed review`,
+          blockingChunkId: depId,
+          blockingChunkTitle: depChunk.title,
+        };
+      }
+
+      return {
+        valid: false,
+        reason: `Dependency "${depChunk.title}" did not pass review (status: ${depChunk.reviewStatus || 'unknown'})`,
+        blockingChunkId: depId,
+        blockingChunkTitle: depChunk.title,
+      };
+    }
+  }
+
+  return { valid: true };
+}
+
+/**
+ * Find all chunks that depend on a given chunk (directly or transitively)
+ */
+function findDependentChunks(chunkId: string, allChunks: Chunk[]): Chunk[] {
+  const dependents: Chunk[] = [];
+  const visited = new Set<string>();
+
+  function collectDependents(id: string) {
+    for (const chunk of allChunks) {
+      if (chunk.dependencies.includes(id) && !visited.has(chunk.id)) {
+        visited.add(chunk.id);
+        dependents.push(chunk);
+        // Recursively find chunks that depend on this dependent
+        collectDependents(chunk.id);
+      }
+    }
+  }
+
+  collectDependents(chunkId);
+  return dependents;
+}
+
 interface RouteContext {
   params: Promise<{ id: string }>;
 }
@@ -442,10 +529,15 @@ export async function POST(_request: Request, context: RouteContext) {
         const runningIds = new Set<string>();
         const failedIds = new Set<string>();
 
-        // Initialize completed set with already completed chunks
+        // Initialize completed set with successfully completed chunks only
+        // A chunk only satisfies dependencies if it passed review (or has no review status for backwards compatibility)
         for (const chunk of allChunks) {
           if (chunk.status === 'completed') {
-            completedIds.add(chunk.id);
+            // For dependency purposes, only count chunks that passed review
+            // Backwards compatibility: chunks without reviewStatus are assumed to pass
+            if (chunk.reviewStatus === 'pass' || !chunk.reviewStatus) {
+              completedIds.add(chunk.id);
+            }
           }
         }
 
@@ -504,6 +596,25 @@ export async function POST(_request: Request, context: RouteContext) {
               if (isRunAllAborted(specId)) {
                 stopReason = 'Aborted by user';
               } else {
+                // Cancel all dependent chunks since this chunk failed execution
+                const dependentChunks = findDependentChunks(chunk.id, currentChunks);
+                for (const dependent of dependentChunks) {
+                  if (!failedIds.has(dependent.id) && !completedIds.has(dependent.id)) {
+                    updateChunk(dependent.id, {
+                      status: 'cancelled',
+                      error: `Blocked: Dependency "${chunk.title}" execution failed`,
+                    });
+                    failedIds.add(dependent.id);
+                    sendEvent(controller, encoder, isClosedRef, 'dependency_blocked', {
+                      chunkId: dependent.id,
+                      chunkTitle: dependent.title,
+                      blockedBy: chunk.id,
+                      blockedByTitle: chunk.title,
+                      reason: 'Dependency execution failed',
+                    });
+                  }
+                }
+
                 failedIds.add(chunk.id);
                 failed++;
                 hasFailure = true;
@@ -541,6 +652,26 @@ export async function POST(_request: Request, context: RouteContext) {
                         chunkId: chunk.id,
                         error: commitResult.error || 'Failed to commit changes',
                       });
+
+                      // Cancel all dependent chunks since commit failed
+                      const dependentChunks = findDependentChunks(chunk.id, currentChunks);
+                      for (const dependent of dependentChunks) {
+                        if (!failedIds.has(dependent.id) && !completedIds.has(dependent.id)) {
+                          updateChunk(dependent.id, {
+                            status: 'cancelled',
+                            error: `Blocked: Dependency "${chunk.title}" git commit failed`,
+                          });
+                          failedIds.add(dependent.id);
+                          sendEvent(controller, encoder, isClosedRef, 'dependency_blocked', {
+                            chunkId: dependent.id,
+                            chunkTitle: dependent.title,
+                            blockedBy: chunk.id,
+                            blockedByTitle: chunk.title,
+                            reason: 'Dependency git commit failed',
+                          });
+                        }
+                      }
+
                       failedIds.add(chunk.id);
                       failed++;
                       hasFailure = true;
@@ -570,6 +701,25 @@ export async function POST(_request: Request, context: RouteContext) {
                     if (isRunAllAborted(specId)) {
                       stopReason = 'Aborted by user';
                     } else {
+                      // Cancel all dependent chunks since fix execution failed
+                      const dependentChunks = findDependentChunks(chunk.id, currentChunks);
+                      for (const dependent of dependentChunks) {
+                        if (!failedIds.has(dependent.id) && !completedIds.has(dependent.id)) {
+                          updateChunk(dependent.id, {
+                            status: 'cancelled',
+                            error: `Blocked: Dependency "${chunk.title}" fix execution failed`,
+                          });
+                          failedIds.add(dependent.id);
+                          sendEvent(controller, encoder, isClosedRef, 'dependency_blocked', {
+                            chunkId: dependent.id,
+                            chunkTitle: dependent.title,
+                            blockedBy: chunk.id,
+                            blockedByTitle: chunk.title,
+                            reason: 'Dependency fix execution failed',
+                          });
+                        }
+                      }
+
                       failedIds.add(chunk.id);
                       failed++;
                       hasFailure = true;
@@ -606,6 +756,26 @@ export async function POST(_request: Request, context: RouteContext) {
                             chunkId: result.fixChunkId,
                             error: commitResult.error || 'Failed to commit fix changes',
                           });
+
+                          // Cancel all dependent chunks since fix commit failed
+                          const dependentChunks = findDependentChunks(chunk.id, currentChunks);
+                          for (const dependent of dependentChunks) {
+                            if (!failedIds.has(dependent.id) && !completedIds.has(dependent.id)) {
+                              updateChunk(dependent.id, {
+                                status: 'cancelled',
+                                error: `Blocked: Dependency "${chunk.title}" fix git commit failed`,
+                              });
+                              failedIds.add(dependent.id);
+                              sendEvent(controller, encoder, isClosedRef, 'dependency_blocked', {
+                                chunkId: dependent.id,
+                                chunkTitle: dependent.title,
+                                blockedBy: chunk.id,
+                                blockedByTitle: chunk.title,
+                                reason: 'Dependency fix git commit failed',
+                              });
+                            }
+                          }
+
                           failedIds.add(chunk.id);
                           failed++;
                           hasFailure = true;
@@ -626,15 +796,66 @@ export async function POST(_request: Request, context: RouteContext) {
                         reason: 'Fix chunk review failed',
                       });
                     }
+
+                    // Cancel all dependent chunks since this chunk failed
+                    const dependentChunks = findDependentChunks(chunk.id, currentChunks);
+                    for (const dependent of dependentChunks) {
+                      if (!failedIds.has(dependent.id) && !completedIds.has(dependent.id)) {
+                        updateChunk(dependent.id, {
+                          status: 'cancelled',
+                          error: `Blocked: Dependency "${chunk.title}" fix failed review`,
+                        });
+                        failedIds.add(dependent.id);
+                        sendEvent(controller, encoder, isClosedRef, 'dependency_blocked', {
+                          chunkId: dependent.id,
+                          chunkTitle: dependent.title,
+                          blockedBy: chunk.id,
+                          blockedByTitle: chunk.title,
+                          reason: 'Dependency fix chunk failed review',
+                        });
+                      }
+                    }
+
                     failedIds.add(chunk.id);
                     failed++;
                     hasFailure = true;
                     stopReason = `Fix chunk "${fixChunk.title}" review failed`;
                     break;
                   } else {
-                    // needs_fix again - mark as completed for now to avoid infinite loop
-                    completedIds.add(chunk.id);
-                    completedIds.add(result.fixChunkId);
+                    // needs_fix again after fix attempt - stop execution, don't mark as completed
+                    // Dependencies should NOT run since this chunk still has issues
+                    if (gitEnabled && gitDir) {
+                      resetHard(gitDir);
+                      sendEvent(controller, encoder, isClosedRef, 'git_reset', {
+                        chunkId: result.fixChunkId,
+                        reason: 'Fix chunk still needs more fixes',
+                      });
+                    }
+
+                    // Cancel all dependent chunks
+                    const dependentChunks = findDependentChunks(chunk.id, currentChunks);
+                    for (const dependent of dependentChunks) {
+                      if (!failedIds.has(dependent.id) && !completedIds.has(dependent.id)) {
+                        updateChunk(dependent.id, {
+                          status: 'cancelled',
+                          error: `Blocked: Dependency "${chunk.title}" still needs fixes after retry`,
+                        });
+                        failedIds.add(dependent.id);
+                        sendEvent(controller, encoder, isClosedRef, 'dependency_blocked', {
+                          chunkId: dependent.id,
+                          chunkTitle: dependent.title,
+                          blockedBy: chunk.id,
+                          blockedByTitle: chunk.title,
+                          reason: 'Dependency still needs fixes after retry',
+                        });
+                      }
+                    }
+
+                    failedIds.add(chunk.id);
+                    failed++;
+                    hasFailure = true;
+                    stopReason = `Chunk "${chunk.title}" still needs fixes after retry`;
+                    break;
                   }
                 }
               } else if (result.reviewResult.status === 'fail') {
@@ -646,6 +867,26 @@ export async function POST(_request: Request, context: RouteContext) {
                     reason: 'Chunk review failed',
                   });
                 }
+
+                // Cancel all dependent chunks since this chunk failed
+                const dependentChunks = findDependentChunks(chunk.id, currentChunks);
+                for (const dependent of dependentChunks) {
+                  if (!failedIds.has(dependent.id) && !completedIds.has(dependent.id)) {
+                    updateChunk(dependent.id, {
+                      status: 'cancelled',
+                      error: `Blocked: Dependency "${chunk.title}" failed review`,
+                    });
+                    failedIds.add(dependent.id);
+                    sendEvent(controller, encoder, isClosedRef, 'dependency_blocked', {
+                      chunkId: dependent.id,
+                      chunkTitle: dependent.title,
+                      blockedBy: chunk.id,
+                      blockedByTitle: chunk.title,
+                      reason: 'Dependency failed review',
+                    });
+                  }
+                }
+
                 failedIds.add(chunk.id);
                 failed++;
                 hasFailure = true;
