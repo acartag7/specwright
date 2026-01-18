@@ -277,14 +277,27 @@ export class SpecExecutionService {
 
       // Handle abortion
       if (wasAborted) {
+        // Compute duration for analytics
+        stats.durationMs = Date.now() - startTime;
+
+        // Log analytics for aborted runs
+        console.log('[Execution] Spec execution aborted:', {
+          specId,
+          specTitle: spec.title,
+          ...stats,
+          durationMinutes: (stats.durationMs / 60000).toFixed(2),
+          reason: stopReason,
+        });
+
         events?.onSpecAborted?.(specId, stopReason || 'Aborted by user');
+        events?.onSpecComplete?.(specId, stats);
         updateSpec(specId, { status: 'review' });
         return;
       }
 
       // Final review if all chunks passed
       if (!hasFailure && stats.passedChunks === stats.totalChunks) {
-        const finalReviewResult = await this.runFinalReview(specId, gitState, stats, events);
+        const { result: finalReviewResult, reviewSvc } = await this.runFinalReview(specId, gitState, stats, events);
 
         if (finalReviewResult.status === 'pass') {
           // Push and create PR
@@ -300,8 +313,8 @@ export class SpecExecutionService {
           }
           updateSpec(specId, { status: 'completed' });
         } else if (finalReviewResult.status === 'needs_fix' && finalReviewResult.fixChunks) {
-          // Create fix chunks and re-run
-          const fixChunkIds = await this.createFinalReviewFixChunks(specId, finalReviewResult.fixChunks);
+          // Create fix chunks and re-run (using same project-specific review service)
+          const fixChunkIds = await this.createFinalReviewFixChunks(specId, finalReviewResult.fixChunks, reviewSvc);
           stats.fixChunksCreated += fixChunkIds.length;
           events?.onFinalReviewFixChunks?.(specId, fixChunkIds);
           updateSpec(specId, { status: 'review' });
@@ -516,28 +529,38 @@ export class SpecExecutionService {
 
   /**
    * Run final review after all chunks pass
+   * Returns the review service used so it can be passed to createFinalReviewFixChunks
    */
   private async runFinalReview(
     specId: string,
     gitState: GitWorkflowState | undefined,
     stats: SpecExecutionStats,
     events?: SpecExecutionEvents
-  ): Promise<FinalReviewResult> {
+  ): Promise<{ result: FinalReviewResult; reviewSvc: ReturnType<typeof createReviewService> }> {
     events?.onFinalReviewStart?.(specId);
 
     const spec = getSpec(specId);
     if (!spec) {
-      return { status: 'error', feedback: '', error: 'Spec not found' };
+      return {
+        result: { status: 'error', feedback: '', error: 'Spec not found' },
+        reviewSvc: reviewService,
+      };
     }
 
     const project = getProject(spec.projectId);
-    const reviewSvc = project?.id ? createReviewService(project.id) : reviewService;
+    if (!project) {
+      return {
+        result: { status: 'error', feedback: '', error: 'Project not found' },
+        reviewSvc: reviewService,
+      };
+    }
 
+    const reviewSvc = createReviewService(project.id);
     const result = await reviewSvc.reviewSpecFinal(specId);
 
     events?.onFinalReviewComplete?.(specId, result);
 
-    return result;
+    return { result, reviewSvc };
   }
 
   /**
@@ -545,9 +568,9 @@ export class SpecExecutionService {
    */
   private async createFinalReviewFixChunks(
     specId: string,
-    fixes: Array<{ title: string; description: string }>
+    fixes: Array<{ title: string; description: string }>,
+    reviewSvc: ReturnType<typeof createReviewService>
   ): Promise<string[]> {
-    const reviewSvc = reviewService;
     return reviewSvc.createFixChunks(specId, fixes);
   }
 }

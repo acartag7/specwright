@@ -176,9 +176,6 @@ export async function POST(_request: Request, context: RouteContext) {
         onPRCreated: (url, number) => {
           sendEvent(controller, encoder, isClosedRef, 'pr_created', { url, number });
         },
-        onCommit: (chunkId, hash) => {
-          sendEvent(controller, encoder, isClosedRef, 'git_commit', { chunkId, commitHash: hash });
-        },
 
         // Final review events
         onFinalReviewStart: (id) => {
