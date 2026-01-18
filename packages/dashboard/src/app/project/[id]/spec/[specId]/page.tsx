@@ -186,6 +186,54 @@ export default function SpecWorkspace() {
     }
   }, [abortChunk, executionState.chunkId, specId]);
 
+  // Handle stopping a specific chunk from ChunkList
+  const handleStopChunk = useCallback(async (chunk: Chunk) => {
+    try {
+      const res = await fetch(`/api/chunks/${chunk.id}/abort`, { method: 'POST' });
+
+      // Check if response is OK before parsing
+      if (!res.ok) {
+        // Try to parse error message if JSON, otherwise use status text
+        const contentType = res.headers.get('Content-Type') || '';
+        if (contentType.includes('application/json')) {
+          const errorData = await res.json().catch(() => ({}));
+          console.error('Failed to stop chunk:', errorData.error || res.statusText);
+        } else {
+          const errorText = await res.text().catch(() => res.statusText);
+          console.error('Failed to stop chunk:', errorText);
+        }
+        return;
+      }
+
+      // Parse successful response
+      const contentType = res.headers.get('Content-Type') || '';
+      if (!contentType.includes('application/json')) {
+        console.error('Failed to stop chunk: unexpected response type');
+        return;
+      }
+
+      const data = await res.json().catch(() => null);
+      if (!data) {
+        console.error('Failed to stop chunk: invalid JSON response');
+        return;
+      }
+
+      if (data.success) {
+        // Refresh chunks to show cancelled status
+        const response = await fetch(`/api/specs/${specId}/chunks`);
+        if (response.ok) {
+          const updatedChunks = await response.json();
+          // Use handleChunksChange to sync both chunks and selectedChunk
+          handleChunksChange(updatedChunks);
+        }
+      } else {
+        console.error('Failed to stop chunk:', data.error);
+      }
+    } catch (err) {
+      console.error('Failed to stop chunk:', err);
+    }
+  }, [specId, handleChunksChange]);
+
   // Sync chunk status from execution state
   useEffect(() => {
     if (executionState.chunkId && executionState.status) {
@@ -607,6 +655,7 @@ export default function SpecWorkspace() {
               onChunksChange={handleChunksChange}
               onRunChunk={handleRunChunk}
               onSelectChunk={handleSelectChunk}
+              onStopChunk={handleStopChunk}
               runningChunkId={executionState.chunkId}
               selectedChunkId={selectedChunk?.id}
             />

@@ -18,6 +18,7 @@ interface ChunkListProps {
   onRunChunk?: (chunk: Chunk) => void;
   onRunAll?: () => void;
   onSelectChunk?: (chunk: Chunk) => void;
+  onStopChunk?: (chunk: Chunk) => void;
   runningChunkId?: string | null;
   selectedChunkId?: string;
   isRunAllRunning?: boolean;
@@ -30,6 +31,7 @@ export default function ChunkList({
   onRunChunk,
   onRunAll,
   onSelectChunk,
+  onStopChunk,
   runningChunkId,
   selectedChunkId,
   isRunAllRunning,
@@ -240,6 +242,7 @@ export default function ChunkList({
                   onRun={() => onRunChunk?.(chunk)}
                   onClick={() => onSelectChunk?.(chunk)}
                   onEditDependencies={() => setEditingDependenciesChunk(chunk)}
+                  onStop={onStopChunk ? () => onStopChunk(chunk) : undefined}
                 />
               ))
             )}
