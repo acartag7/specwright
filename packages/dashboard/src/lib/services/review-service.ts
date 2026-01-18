@@ -15,29 +15,16 @@ import { getChunk, updateChunk, insertFixChunk, getSpec, getChunksBySpec } from 
 import { getProject } from '../db/projects';
 import { buildReviewPrompt, buildEnhancedReviewPrompt, parseReviewResult, type ValidationResultForPrompt } from '../prompts';
 import { getDb, generateId } from '../db/connection';
-import { classifyError, retryWithBackoff, type ErrorType } from '../review';
+import {
+  classifyError,
+  retryWithBackoff,
+  type ErrorType,
+  type ChunkReviewResult,
+  type FinalReviewResult,
+} from '../review';
 
-// Re-export ErrorType for consumers that import from this module
-export type { ErrorType };
-
-export interface ChunkReviewResult {
-  status: 'pass' | 'fail' | 'needs_fix' | 'error';
-  feedback?: string;
-  fixChunk?: { title: string; description: string };
-  fixChunkId?: string;
-  error?: string;
-  errorType?: ErrorType;
-}
-
-export interface FinalReviewResult {
-  status: 'pass' | 'fail' | 'needs_fix' | 'error';
-  feedback: string;
-  integrationIssues?: string[];
-  missingRequirements?: string[];
-  fixChunks?: Array<{ title: string; description: string }>;
-  error?: string;
-  errorType?: ErrorType;
-}
+// Re-export types for consumers that import from this module
+export type { ErrorType, ChunkReviewResult, FinalReviewResult };
 
 interface ReviewLogEntry {
   chunkId?: string;

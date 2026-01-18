@@ -17,6 +17,7 @@ export interface ChunkReviewResult {
   status: 'pass' | 'fail' | 'needs_fix' | 'error';
   feedback?: string;
   fixChunk?: { title: string; description: string };
+  fixChunkId?: string;
   error?: string;
   errorType?: ErrorType;
 }
