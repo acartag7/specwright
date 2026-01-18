@@ -15,7 +15,8 @@ import {
   isRunAllAborted,
   hasActiveRunAllSession,
 } from '@/lib/execution';
-import { buildReviewPrompt, parseReviewResult } from '@/lib/prompts';
+import { buildReviewPrompt, buildEnhancedReviewPrompt, parseReviewResult } from '@/lib/prompts';
+import { validateChunkCompletion, type ValidationResult } from '@/lib/review-validation';
 import {
   checkGitRepo,
   getCurrentBranch,
@@ -314,9 +315,6 @@ export async function POST(_request: Request, context: RouteContext) {
           output: completionResult.output || '',
         });
 
-        // Now review the chunk
-        sendEvent(controller, encoder, isClosedRef, 'review_start', { chunkId });
-
         // Get updated chunk with output
         const updatedChunk = getChunk(chunkId);
         if (!updatedChunk) {
@@ -327,8 +325,54 @@ export async function POST(_request: Request, context: RouteContext) {
           return { success: false };
         }
 
-        // Build review prompt and call Opus
-        const reviewPrompt = buildReviewPrompt(updatedChunk);
+        // Pre-review validation: check for file changes and build success (only when git is enabled)
+        let validation: ValidationResult | undefined;
+        if (gitEnabled && gitDir) {
+          sendEvent(controller, encoder, isClosedRef, 'validation_start', { chunkId });
+
+          validation = await validateChunkCompletion(gitDir, chunkId);
+
+          sendEvent(controller, encoder, isClosedRef, 'validation_complete', {
+            chunkId,
+            filesChanged: validation.filesChanged,
+            buildSuccess: validation.buildResult.success,
+            autoFail: validation.autoFail ? true : false,
+          });
+
+          // Handle auto-fail conditions (skip Claude review)
+          if (validation.autoFail) {
+            const reviewStatus = validation.autoFail.reason === 'no_changes' ? 'fail' : 'needs_fix';
+
+            updateChunk(chunkId, {
+              reviewStatus,
+              reviewFeedback: validation.autoFail.feedback,
+            });
+
+            sendEvent(controller, encoder, isClosedRef, 'review_complete', {
+              chunkId,
+              status: reviewStatus,
+              feedback: validation.autoFail.feedback,
+              autoFailed: true,
+              reason: validation.autoFail.reason,
+            });
+
+            return {
+              success: false,
+              reviewResult: {
+                status: reviewStatus,
+                feedback: validation.autoFail.feedback,
+              },
+            };
+          }
+        }
+
+        // Now review the chunk with Claude
+        sendEvent(controller, encoder, isClosedRef, 'review_start', { chunkId });
+
+        // Build review prompt - use enhanced prompt if validation available, otherwise use basic prompt
+        const reviewPrompt = validation
+          ? buildEnhancedReviewPrompt(updatedChunk, validation)
+          : buildReviewPrompt(updatedChunk);
         const claudeClient = new ClaudeClient();
 
         try {
