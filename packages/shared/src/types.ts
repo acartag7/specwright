@@ -80,10 +80,35 @@ export interface ChunkGraph {
   edges: Array<{ from: string; to: string }>;
 }
 
-export type ReviewStatus = 'pass' | 'needs_fix' | 'fail';
+export type ReviewStatus = 'pass' | 'needs_fix' | 'fail' | 'error' | 'skipped';
+
+// Narrower type for actual review results (skipped is a chunk status, not a review result)
+export type ReviewResultStatus = 'pass' | 'needs_fix' | 'fail';
+
+export interface ReviewLog {
+  id: string;
+  chunkId?: string;
+  specId?: string;
+  reviewType: 'chunk' | 'final';
+  model: string;
+  status: 'pass' | 'needs_fix' | 'fail' | 'error';
+  feedback?: string;
+  errorMessage?: string;
+  errorType?: 'rate_limit' | 'parse_error' | 'unknown';
+  attemptNumber: number;
+  durationMs?: number;
+  createdAt: string;
+}
+
+export interface ReviewWarning {
+  type: 'rate_limit' | 'review_error' | 'needs_fix';
+  count: number;
+  chunkIds: string[];
+  message: string;
+}
 
 export interface ReviewResult {
-  status: ReviewStatus;
+  status: ReviewResultStatus;
   feedback: string;
   fixChunk?: {
     title: string;

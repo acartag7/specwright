@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import type { Project, Spec, Chunk, ChunkToolCall } from '@specwright/shared';
+import type { Project, Spec, Chunk, ChunkToolCall, ReviewWarning } from '@specwright/shared';
 import SpecEditor from '@/components/SpecEditor';
 import ChunkList from '@/components/ChunkList';
 import ExecutionPanel from '@/components/ExecutionPanel';
@@ -36,6 +36,7 @@ export default function SpecWorkspace() {
   const [showRunAllPanel, setShowRunAllPanel] = useState(false);
   const [showCompletePanel, setShowCompletePanel] = useState(false);
   const [gitError, setGitError] = useState<string | null>(null);
+  const [reviewWarnings, setReviewWarnings] = useState<ReviewWarning[]>([]);
 
   // Run All state
   const {
@@ -209,6 +210,19 @@ export default function SpecWorkspace() {
     }
   }, [specId]);
 
+  // Fetch review warnings for the spec
+  const fetchReviewWarnings = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/specs/${specId}/review-logs`);
+      if (response.ok) {
+        const data = await response.json();
+        setReviewWarnings(data.warnings);
+      }
+    } catch (err) {
+      console.error('Failed to fetch review warnings:', err);
+    }
+  }, [specId]);
+
   // Handle reviewing a completed chunk
   const handleReviewChunk = useCallback(async () => {
     if (!selectedChunk) return;
@@ -288,6 +302,13 @@ export default function SpecWorkspace() {
       refreshChunks();
     }
   }, [runAllState.isRunning, showRunAllPanel, runAllState.progress.current, refreshChunks]);
+
+  // Fetch review warnings when Run All panel is shown or run completes
+  useEffect(() => {
+    if (showRunAllPanel) {
+      fetchReviewWarnings();
+    }
+  }, [showRunAllPanel, runAllState.isRunning, fetchReviewWarnings]);
 
   // Check if all chunks are completed to show completion panel
   const allChunksCompleted = chunks.length > 0 && chunks.every(c => c.status === 'completed');
@@ -611,6 +632,8 @@ export default function SpecWorkspace() {
                 error={runAllState.error}
                 onStop={stopRunAll}
                 onClose={handleCloseRunAll}
+                reviewWarnings={reviewWarnings}
+                onDismissWarnings={() => setReviewWarnings([])}
               />
             ) : showCompletePanel || (showCompletionState && !spec.prUrl) ? (
               <SpecCompletePanel

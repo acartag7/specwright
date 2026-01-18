@@ -21,3 +21,6 @@ export { getAllWorkers, getActiveWorkers, getWorker, getWorkerBySpec, createWork
 
 // Queue operations
 export { getWorkerQueue, getQueueItem, getQueueItemBySpec, addToQueue, removeFromQueue, removeFromQueueBySpec, getNextQueueItem, reorderQueue } from './queue';
+
+// Review logs operations
+export { getReviewLogsBySpec, getReviewLogsByChunk, getReviewWarningsForSpec } from './review-logs';
