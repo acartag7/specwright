@@ -223,7 +223,8 @@ export default function SpecWorkspace() {
         const response = await fetch(`/api/specs/${specId}/chunks`);
         if (response.ok) {
           const updatedChunks = await response.json();
-          setChunks(updatedChunks);
+          // Use handleChunksChange to sync both chunks and selectedChunk
+          handleChunksChange(updatedChunks);
         }
       } else {
         console.error('Failed to stop chunk:', data.error);
@@ -231,7 +232,7 @@ export default function SpecWorkspace() {
     } catch (err) {
       console.error('Failed to stop chunk:', err);
     }
-  }, [specId]);
+  }, [specId, handleChunksChange]);
 
   // Sync chunk status from execution state
   useEffect(() => {
