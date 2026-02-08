@@ -1,12 +1,12 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 
 interface CreateProjectModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (data: { name: string; directory: string; description?: string }) => void;
-  isLoading?: boolean;
+  onProjectCreated?: () => void;
 }
 
 interface DirectorySuggestions {
@@ -26,9 +26,9 @@ interface DirectoryValidation {
 export default function CreateProjectModal({
   isOpen,
   onClose,
-  onSubmit,
-  isLoading = false,
+  onProjectCreated,
 }: CreateProjectModalProps) {
+  const router = useRouter();
   const [name, setName] = useState('');
   const [directory, setDirectory] = useState('');
   const [description, setDescription] = useState('');
@@ -37,6 +37,9 @@ export default function CreateProjectModal({
   const [validation, setValidation] = useState<DirectoryValidation | null>(null);
   const [isValidating, setIsValidating] = useState(false);
   const [isCreatingDir, setIsCreatingDir] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
+  const [createdProjectId, setCreatedProjectId] = useState<string | null>(null);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   const nameInputRef = useRef<HTMLInputElement>(null);
   const directoryInputRef = useRef<HTMLInputElement>(null);
@@ -57,6 +60,8 @@ export default function CreateProjectModal({
       setDescription('');
       setValidation(null);
       setShowSuggestions(false);
+      setCreatedProjectId(null);
+      setCreateError(null);
     }
   }, [isOpen]);
 
@@ -93,7 +98,7 @@ export default function CreateProjectModal({
       });
       const result = await res.json();
       setValidation(result);
-    } catch (error) {
+    } catch {
       setValidation({ exists: false, valid: false, error: 'Failed to validate' });
     } finally {
       setIsValidating(false);
@@ -113,7 +118,7 @@ export default function CreateProjectModal({
       });
       const result = await res.json();
       setValidation(result);
-    } catch (error) {
+    } catch {
       setValidation({ exists: false, valid: false, error: 'Failed to create directory' });
     } finally {
       setIsCreatingDir(false);
@@ -146,15 +151,34 @@ export default function CreateProjectModal({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || !directory.trim()) return;
 
-    onSubmit({
-      name: name.trim(),
-      directory: directory.trim(),
-      description: description.trim() || undefined,
-    });
+    setIsCreating(true);
+    setCreateError(null);
+    try {
+      const res = await fetch('/api/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: name.trim(),
+          directory: directory.trim(),
+          description: description.trim() || undefined,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Failed to create project');
+      }
+      const project = await res.json();
+      setCreatedProjectId(project.id);
+      onProjectCreated?.();
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : 'Failed to create project');
+    } finally {
+      setIsCreating(false);
+    }
   };
 
   const handleSelectSuggestion = (path: string) => {
@@ -164,13 +188,26 @@ export default function CreateProjectModal({
     validateDirectory(path);
   };
 
+  const handleSetupMetaSpec = () => {
+    if (createdProjectId) {
+      onClose();
+      router.push(`/project/${createdProjectId}?setup=meta-spec`);
+    }
+  };
+
+  const handleSkip = () => {
+    if (createdProjectId) {
+      onClose();
+      router.push(`/project/${createdProjectId}`);
+    }
+  };
+
   if (!isOpen) return null;
 
   // Build suggestions list
   const suggestionItems: { label: string; path: string; type: 'recent' | 'base' | 'suggested' }[] = [];
 
   if (suggestions) {
-    // Add suggested path first if available and different from current
     if (suggestions.suggestedPath && suggestions.suggestedPath !== directory) {
       suggestionItems.push({
         label: 'Suggested',
@@ -179,14 +216,12 @@ export default function CreateProjectModal({
       });
     }
 
-    // Add recent directories
     suggestions.recentDirectories.slice(0, 3).forEach(dir => {
       if (!suggestionItems.find(s => s.path === dir)) {
         suggestionItems.push({ label: 'Recent', path: dir, type: 'recent' });
       }
     });
 
-    // Add base paths for new projects
     if (name.trim()) {
       const safeName = name
         .toLowerCase()
@@ -201,6 +236,67 @@ export default function CreateProjectModal({
         }
       });
     }
+  }
+
+  // Success view with next steps
+  if (createdProjectId) {
+    return (
+      <div className="fixed inset-0 z-50 overflow-y-auto">
+        <div
+          className="fixed inset-0 bg-black/70 backdrop-blur-sm transition-opacity"
+          onClick={onClose}
+        />
+        <div className="flex min-h-full items-center justify-center p-4">
+          <div
+            className="relative w-full max-w-lg bg-neutral-900 border border-neutral-800 rounded-lg shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-800 bg-neutral-900/80">
+              <div className="flex items-center gap-3">
+                <div className="flex gap-1.5">
+                  <div className="h-3 w-3 rounded-full bg-red-500/80" />
+                  <div className="h-3 w-3 rounded-full bg-amber-500/80" />
+                  <div className="h-3 w-3 rounded-full bg-emerald-500/80" />
+                </div>
+                <h2 className="text-sm font-medium text-neutral-100 font-mono">project created</h2>
+              </div>
+            </div>
+
+            <div className="px-4 py-6 space-y-4">
+              <div className="flex items-center gap-2 text-emerald-400">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                <span className="text-sm font-mono font-medium">{name} is ready</span>
+              </div>
+
+              <p className="text-xs text-neutral-400 font-mono leading-relaxed">
+                a meta-spec defines your project&apos;s vision, architecture, and phases.
+                setting one up helps guide spec generation and chunk planning.
+              </p>
+
+              <div className="space-y-2 pt-2">
+                <button
+                  onClick={handleSetupMetaSpec}
+                  className="w-full px-4 py-2.5 text-xs font-mono bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-md transition-colors text-left flex items-center justify-between"
+                >
+                  <span>set up meta-spec</span>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+                <button
+                  onClick={handleSkip}
+                  className="w-full px-4 py-2.5 text-xs font-mono text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800 border border-neutral-800 rounded-md transition-colors text-left"
+                >
+                  skip for now
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -240,6 +336,13 @@ export default function CreateProjectModal({
           {/* Form */}
           <form onSubmit={handleSubmit}>
             <div className="px-4 py-4 space-y-4">
+              {/* Error */}
+              {createError && (
+                <div className="bg-red-900/20 border border-red-800/50 rounded-md p-3 text-xs text-red-400 font-mono">
+                  {createError}
+                </div>
+              )}
+
               {/* Name */}
               <div>
                 <label htmlFor="name" className="block text-xs font-medium text-neutral-400 mb-1.5 font-mono">
@@ -254,7 +357,7 @@ export default function CreateProjectModal({
                   placeholder="my-awesome-project"
                   className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-md text-neutral-100 text-sm placeholder-neutral-600 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 focus:border-emerald-500/50 transition-shadow font-mono"
                   required
-                  disabled={isLoading}
+                  disabled={isCreating}
                 />
               </div>
 
@@ -289,7 +392,7 @@ export default function CreateProjectModal({
                         : 'border-neutral-800 focus:ring-emerald-500/50 focus:border-emerald-500/50'
                     }`}
                     required
-                    disabled={isLoading}
+                    disabled={isCreating}
                   />
                   {/* Validation indicator */}
                   <div className="absolute right-2 top-1/2 -translate-y-1/2">
@@ -342,7 +445,7 @@ export default function CreateProjectModal({
                 {validation && !validation.exists && validation.valid && (
                   <div className="mt-1.5 flex items-center justify-between">
                     <p className="text-[10px] text-amber-400 font-mono">
-                      directory doesn't exist
+                      directory doesn&apos;t exist
                     </p>
                     <button
                       type="button"
@@ -373,7 +476,7 @@ export default function CreateProjectModal({
                   <p className="mt-1.5 text-[10px] text-red-400 font-mono">{validation.error}</p>
                 )}
                 {validation?.created && (
-                  <p className="mt-1.5 text-[10px] text-emerald-400 font-mono">directory created ✓</p>
+                  <p className="mt-1.5 text-[10px] text-emerald-400 font-mono">directory created</p>
                 )}
                 {!validation && (
                   <p className="mt-1.5 text-[10px] text-neutral-600 font-mono">
@@ -394,7 +497,7 @@ export default function CreateProjectModal({
                   placeholder="a brief description of this project..."
                   rows={2}
                   className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-md text-neutral-100 text-sm placeholder-neutral-600 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 focus:border-emerald-500/50 transition-shadow resize-none font-mono"
-                  disabled={isLoading}
+                  disabled={isCreating}
                 />
               </div>
             </div>
@@ -405,16 +508,16 @@ export default function CreateProjectModal({
                 type="button"
                 onClick={onClose}
                 className="px-3 py-1.5 text-xs font-mono text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800 rounded-md transition-colors"
-                disabled={isLoading}
+                disabled={isCreating}
               >
                 cancel
               </button>
               <button
                 type="submit"
-                disabled={!name.trim() || !directory.trim() || isLoading}
+                disabled={!name.trim() || !directory.trim() || isCreating}
                 className="px-3 py-1.5 text-xs font-mono bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 disabled:bg-neutral-800 disabled:text-neutral-500 disabled:border-neutral-700 rounded-md transition-colors flex items-center gap-2"
               >
-                {isLoading ? (
+                {isCreating ? (
                   <>
                     <svg className="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24">
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />

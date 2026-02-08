@@ -13,10 +13,9 @@ import type { ChunkStats } from '@/components/ProjectCard';
 
 export default function Home() {
   const router = useRouter();
-  const { projects, isLoading, error, createProject, deleteProject } = useProjects();
+  const { projects, isLoading, error, deleteProject, refresh } = useProjects();
   const { state: workersState } = useWorkers();
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isCreating, setIsCreating] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [projectStats, setProjectStats] = useState<Record<string, ChunkStats>>({});
 
@@ -55,20 +54,6 @@ export default function Home() {
     // Navigate to project page (run all will be handled there)
     router.push(`/project/${projectId}`);
   }, [router]);
-
-  const handleCreate = async (data: { name: string; directory: string; description?: string }) => {
-    try {
-      setIsCreating(true);
-      const project = await createProject(data);
-      setIsModalOpen(false);
-      router.push(`/project/${project.id}`);
-    } catch (err) {
-      console.error('Failed to create project:', err);
-      alert(err instanceof Error ? err.message : 'Failed to create project');
-    } finally {
-      setIsCreating(false);
-    }
-  };
 
   const handleDelete = async (id: string) => {
     if (deleteConfirm !== id) {
@@ -177,8 +162,7 @@ export default function Home() {
       <CreateProjectModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        onSubmit={handleCreate}
-        isLoading={isCreating}
+        onProjectCreated={refresh}
       />
     </main>
     </ErrorBoundary>
