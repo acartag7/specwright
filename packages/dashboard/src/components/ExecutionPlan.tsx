@@ -3,6 +3,7 @@
 import { useMemo } from 'react';
 import type { Chunk } from '@specwright/shared';
 import { buildExecutionPlan, calculateLayout, calculateCriticalPath, groupByLayers } from '@/lib/graph-layout';
+import { buildWaveSchedule } from '@/lib/execution/wave-scheduler';
 
 interface ExecutionPlanProps {
   chunks: Chunk[];
@@ -21,6 +22,7 @@ export default function ExecutionPlan({
   );
 
   const plan = useMemo(() => buildExecutionPlan(chunks), [chunks]);
+  const waveSchedule = useMemo(() => buildWaveSchedule(chunks), [chunks]);
 
   const graph = useMemo(() => calculateLayout(chunks), [chunks]);
   const criticalPath = useMemo(() => calculateCriticalPath(graph), [graph]);
@@ -37,8 +39,8 @@ export default function ExecutionPlan({
     c.status === 'pending' || c.status === 'failed' || c.status === 'cancelled'
   ).length;
   const totalCompleted = chunks.filter(c => c.status === 'completed').length;
-  const parallelSteps = plan.filter(s => s.parallel).length;
-  const sequentialSteps = plan.filter(s => !s.parallel).length;
+  const parallelWaves = waveSchedule.waves.filter(w => w.parallel).length;
+  const totalWaves = waveSchedule.waves.length;
 
   if (chunks.length === 0) {
     return (
@@ -57,7 +59,7 @@ export default function ExecutionPlan({
       <div className="h-full flex items-center justify-center">
         <div className="bg-emerald-950/20 border border-emerald-500/30 rounded-md p-6 text-center">
           <p className="text-emerald-400 text-xs font-mono">
-            ✓ All chunks completed!
+            All chunks completed!
           </p>
         </div>
       </div>
@@ -71,7 +73,7 @@ export default function ExecutionPlan({
         <div>
           <h3 className="text-sm font-mono text-neutral-200">Execution Plan</h3>
           <p className="text-[10px] font-mono text-neutral-500 mt-1">
-            {totalPending} chunks to run • {plan.length} steps • {parallelSteps} parallel, {sequentialSteps} sequential
+            {totalPending} chunks to run | {totalWaves} {totalWaves === 1 ? 'wave' : 'waves'} | {parallelWaves} parallel
           </p>
         </div>
         {onRunAll && (
@@ -104,59 +106,89 @@ export default function ExecutionPlan({
         )}
       </div>
 
-      {/* Plan steps */}
+      {/* Wave steps */}
       <div className="flex-1 overflow-auto space-y-3 pb-4">
-        {plan.map((step, idx) => (
+        {waveSchedule.waves.map((wave) => (
           <div
-            key={step.step}
+            key={wave.index}
             className="border border-neutral-800 rounded-lg overflow-hidden"
           >
-            {/* Step header */}
+            {/* Wave header */}
             <div className="px-3 py-2 bg-neutral-900/50 flex items-center justify-between">
-              <span className="text-[11px] font-mono text-neutral-400">
-                Step {step.step}: Run {step.parallel ? 'in parallel' : 'sequentially'}
-                <span className="text-neutral-600 ml-2">
-                  ({step.chunks.length} {step.chunks.length === 1 ? 'chunk' : 'chunks'})
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-mono text-neutral-950 bg-neutral-400 px-1.5 py-0.5 rounded font-bold">
+                  W{wave.index}
                 </span>
-              </span>
-              {step.parallel && (
+                <span className="text-[11px] font-mono text-neutral-400">
+                  {wave.parallel ? 'Parallel' : 'Sequential'}
+                  <span className="text-neutral-600 ml-2">
+                    ({wave.chunks.length} {wave.chunks.length === 1 ? 'chunk' : 'chunks'})
+                  </span>
+                </span>
+              </div>
+              {wave.parallel && (
                 <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded">
-                  ⚡ parallel
+                  parallel
                 </span>
               )}
             </div>
 
-            {/* Chunks in this step */}
+            {/* Chunks in this wave */}
             <div className="p-3 bg-neutral-950/50 space-y-2">
-              {step.chunks.map((chunk, chunkIdx) => (
-                <div
-                  key={chunk.id}
-                  className="flex items-start gap-2 text-xs font-mono"
-                >
-                  <span className="text-neutral-600 w-4 text-right flex-shrink-0">
-                    {step.parallel ? '├──' : chunkIdx === step.chunks.length - 1 ? '└──' : '├──'}
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <span className="text-neutral-200">{chunk.title}</span>
-                    {chunk.dependencyTitles.length > 0 && (
-                      <div className="text-[10px] text-neutral-500 mt-0.5">
-                        ↪ depends on: {chunk.dependencyTitles.slice(0, 3).join(', ')}
-                        {chunk.dependencyTitles.length > 3 && ` +${chunk.dependencyTitles.length - 3}`}
-                      </div>
-                    )}
+              {wave.chunks.map((chunk, chunkIdx) => {
+                const fullChunk = chunkMap.get(chunk.id);
+
+                return (
+                  <div
+                    key={chunk.id}
+                    className="flex items-start gap-2 text-xs font-mono"
+                  >
+                    <span className="text-neutral-600 w-4 text-right flex-shrink-0">
+                      {wave.parallel ? '||' : chunkIdx === wave.chunks.length - 1 ? '\\-' : '|-'}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <span className="text-neutral-200">{chunk.title}</span>
+                      {fullChunk && fullChunk.dependencies.length > 0 && (
+                        <div className="text-[10px] text-neutral-500 mt-0.5">
+                          depends on: {fullChunk.dependencies.slice(0, 3).map(depId => {
+                            const dep = chunkMap.get(depId);
+                            return dep?.title || depId;
+                          }).join(', ')}
+                          {fullChunk.dependencies.length > 3 && ` +${fullChunk.dependencies.length - 3}`}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         ))}
       </div>
 
+      {/* Serialization reasons */}
+      {waveSchedule.serializedChunks.length > 0 && (
+        <div className="flex-shrink-0 mt-2 p-3 bg-blue-950/10 border border-blue-500/20 rounded-lg space-y-1">
+          <span className="text-[11px] font-mono text-blue-400">File overlap serialization</span>
+          {waveSchedule.serializedChunks.map((sr, idx) => {
+            const titleA = chunkMap.get(sr.chunkA)?.title || sr.chunkA;
+            const titleB = chunkMap.get(sr.chunkB)?.title || sr.chunkB;
+            const shortFiles = sr.overlappingFiles.slice(0, 2).join(', ');
+            const extra = sr.overlappingFiles.length > 2 ? ` +${sr.overlappingFiles.length - 2}` : '';
+            return (
+              <p key={idx} className="text-[10px] font-mono text-neutral-400">
+                {titleA} and {titleB} both modify {shortFiles}{extra} — running sequentially
+              </p>
+            );
+          })}
+        </div>
+      )}
+
       {/* Critical path */}
       {criticalPath.length > 1 && (
         <div className="flex-shrink-0 mt-2 p-3 bg-amber-950/10 border border-amber-500/20 rounded-lg">
           <div className="flex items-center gap-2 mb-2">
-            <span className="text-[11px] font-mono text-amber-400">◆ Critical Path</span>
+            <span className="text-[11px] font-mono text-amber-400">Critical Path</span>
             <span className="text-[10px] font-mono text-neutral-500">
               (longest dependency chain - {criticalPath.length} chunks)
             </span>
@@ -166,7 +198,7 @@ export default function ExecutionPlan({
               <span key={idx}>
                 {title.length > 20 ? title.slice(0, 18) + '...' : title}
                 {idx < criticalPathTitles.length - 1 && (
-                  <span className="text-amber-500/60 mx-1">→</span>
+                  <span className="text-amber-500/60 mx-1">{'->'}</span>
                 )}
               </span>
             ))}
@@ -177,8 +209,8 @@ export default function ExecutionPlan({
       {/* Summary */}
       <div className="flex-shrink-0 mt-3 px-1 text-[10px] font-mono text-neutral-500">
         <div className="flex items-center gap-4">
-          <span>✓ {totalCompleted} completed</span>
-          <span>○ {totalPending} pending</span>
+          <span>{totalCompleted} completed</span>
+          <span>{totalPending} pending</span>
           <span>{layers.length} {layers.length === 1 ? 'layer' : 'layers'}</span>
         </div>
       </div>

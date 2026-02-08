@@ -27,6 +27,9 @@ import {
   validateDependencies,
   cancelDependentChunks,
 } from './dependency-resolver';
+import { buildWaveSchedule } from '../execution/wave-scheduler';
+import { executeWave, type WaveResult } from '../execution/parallel-executor';
+import { loadConfig } from '../config/config-loader';
 
 // Track active run-all sessions
 interface ActiveSession {
@@ -49,6 +52,8 @@ export interface SpecExecutionEvents extends Omit<ChunkPipelineEvents, 'onExecut
     blockedByTitle: string,
     reason: string
   ) => void;
+  onWaveStart?: (specId: string, waveIndex: number, chunkIds: string[]) => void;
+  onWaveComplete?: (specId: string, waveIndex: number, result: WaveResult) => void;
   onGitWorkflowInit?: (state: GitWorkflowState) => void;
   onGitReset?: (chunkId: string, reason: string) => void;
   onGitCommit?: (chunkId: string, commitHash: string, filesChanged?: number) => void;
@@ -188,104 +193,120 @@ export class SpecExecutionService {
         }
       }
 
-      let currentIndex = 0;
+      // Check parallel config
+      const config = await loadConfig(project.directory);
+      const useParallel = config.parallel.enabled;
 
-      while (!hasFailure && !stopReason) {
-        if (this.isAborted(specId)) {
-          stopReason = 'Aborted by user';
-          wasAborted = true;
-          break;
-        }
+      if (useParallel) {
+        // --- Parallel wave-based execution ---
+        const waveScheduleResult = this.runWaveExecution(
+          specId, allChunks, completedIds, failedIds, stats, gitState, events, config.parallel.maxConcurrent,
+        );
+        const waveOutcome = await waveScheduleResult;
+        hasFailure = waveOutcome.hasFailure;
+        stopReason = waveOutcome.stopReason;
+        wasAborted = waveOutcome.wasAborted;
+      } else {
+        // --- Sequential execution (original path) ---
+        let currentIndex = 0;
 
-        const currentChunks = getChunksBySpec(specId);
-        const runnableChunks = findRunnableChunks(currentChunks, completedIds, failedIds);
-
-        if (runnableChunks.length === 0) {
-          break;
-        }
-
-        for (const chunk of runnableChunks) {
-          if (this.isAborted(specId) || hasFailure) {
-            if (this.isAborted(specId)) {
-              wasAborted = true;
-              stopReason = 'Aborted by user';
-            }
-            break;
-          }
-
-          const depValidation = validateDependencies(chunk, currentChunks, completedIds);
-          if (!depValidation.valid) {
-            console.log(`[Execution] Skipping chunk "${chunk.title}": ${depValidation.reason}`);
-            updateChunk(chunk.id, {
-              status: 'cancelled',
-              error: depValidation.reason,
-            });
-            failedIds.add(chunk.id);
-            stats.skippedChunks++;
-            events?.onDependencyBlocked?.(
-              chunk.id, chunk.title,
-              depValidation.blockingChunkId || '',
-              depValidation.blockingChunkTitle || '',
-              depValidation.reason || ''
-            );
-            cancelDependentChunks(chunk.id, chunk.title, 'dependency failed', currentChunks, completedIds, failedIds, stats, events);
-            continue;
-          }
-
-          currentIndex++;
-
-          const result = await this.runChunkWithRetry(
-            chunk, specId, currentIndex, stats.totalChunks, gitState, events
-          );
-
-          if (result.status === 'cancelled') {
+        while (!hasFailure && !stopReason) {
+          if (this.isAborted(specId)) {
             stopReason = 'Aborted by user';
             wasAborted = true;
             break;
           }
 
-          if (result.status === 'pass') {
-            completedIds.add(chunk.id);
-            stats.passedChunks++;
-            if (result.commitHash) {
-              events?.onGitCommit?.(chunk.id, result.commitHash);
-            }
-          } else if (result.status === 'needs_fix' && result.fixChunkId) {
-            const fixChunk = getChunk(result.fixChunkId);
+          const currentChunks = getChunksBySpec(specId);
+          const runnableChunks = findRunnableChunks(currentChunks, completedIds, failedIds);
 
-            if (!fixChunk) {
-              console.error(`[Execution] Fix chunk not found: ${result.fixChunkId}`);
+          if (runnableChunks.length === 0) {
+            break;
+          }
+
+          for (const chunk of runnableChunks) {
+            if (this.isAborted(specId) || hasFailure) {
+              if (this.isAborted(specId)) {
+                wasAborted = true;
+                stopReason = 'Aborted by user';
+              }
+              break;
+            }
+
+            const depValidation = validateDependencies(chunk, currentChunks, completedIds);
+            if (!depValidation.valid) {
+              console.log(`[Execution] Skipping chunk "${chunk.title}": ${depValidation.reason}`);
+              updateChunk(chunk.id, {
+                status: 'cancelled',
+                error: depValidation.reason,
+              });
+              failedIds.add(chunk.id);
+              stats.skippedChunks++;
+              events?.onDependencyBlocked?.(
+                chunk.id, chunk.title,
+                depValidation.blockingChunkId || '',
+                depValidation.blockingChunkTitle || '',
+                depValidation.reason || ''
+              );
+              cancelDependentChunks(chunk.id, chunk.title, 'dependency failed', currentChunks, completedIds, failedIds, stats, events);
+              continue;
+            }
+
+            currentIndex++;
+
+            const result = await this.runChunkWithRetry(
+              chunk, specId, currentIndex, stats.totalChunks, gitState, events
+            );
+
+            if (result.status === 'cancelled') {
+              stopReason = 'Aborted by user';
+              wasAborted = true;
+              break;
+            }
+
+            if (result.status === 'pass') {
+              completedIds.add(chunk.id);
+              stats.passedChunks++;
+              if (result.commitHash) {
+                events?.onGitCommit?.(chunk.id, result.commitHash);
+              }
+            } else if (result.status === 'needs_fix' && result.fixChunkId) {
+              const fixChunk = getChunk(result.fixChunkId);
+
+              if (!fixChunk) {
+                console.error(`[Execution] Fix chunk not found: ${result.fixChunkId}`);
+                failedIds.add(chunk.id);
+                stats.failedChunks++;
+                hasFailure = true;
+                stopReason = `Fix chunk not found: ${result.fixChunkId}`;
+                cancelDependentChunks(chunk.id, chunk.title, 'missing fix chunk', currentChunks, completedIds, failedIds, stats, events);
+              } else {
+                stats.fixChunksCreated++;
+                stats.totalChunks++;
+
+                const fixResult = await this.runChunkWithRetry(
+                  fixChunk, specId, currentIndex, stats.totalChunks, gitState, events, true
+                );
+
+                if (fixResult.status === 'pass') {
+                  completedIds.add(chunk.id);
+                  completedIds.add(result.fixChunkId);
+                  stats.passedChunks += 2;
+                } else {
+                  failedIds.add(chunk.id);
+                  stats.failedChunks += 2;
+                  hasFailure = true;
+                  stopReason = `Fix chunk "${fixChunk.title}" failed`;
+                  cancelDependentChunks(chunk.id, chunk.title, 'fix failed', currentChunks, completedIds, failedIds, stats, events);
+                }
+              }
+            } else {
               failedIds.add(chunk.id);
               stats.failedChunks++;
               hasFailure = true;
-              stopReason = `Fix chunk not found: ${result.fixChunkId}`;
-              cancelDependentChunks(chunk.id, chunk.title, 'missing fix chunk', currentChunks, completedIds, failedIds, stats, events);
-            } else {
-              stats.fixChunksCreated++;
-              stats.totalChunks++;
-
-              const fixResult = await this.runChunkWithRetry(
-                fixChunk, specId, currentIndex, stats.totalChunks, gitState, events, true
-              );
-
-              if (fixResult.status === 'pass') {
-                completedIds.add(chunk.id);
-                completedIds.add(result.fixChunkId);
-                stats.passedChunks += 2;
-              } else {
-                failedIds.add(chunk.id);
-                stats.failedChunks += 2;
-                hasFailure = true;
-                stopReason = `Fix chunk "${fixChunk.title}" failed`;
-                cancelDependentChunks(chunk.id, chunk.title, 'fix failed', currentChunks, completedIds, failedIds, stats, events);
-              }
+              stopReason = `Chunk "${chunk.title}" failed: ${result.error || result.reviewFeedback}`;
+              cancelDependentChunks(chunk.id, chunk.title, 'failed', currentChunks, completedIds, failedIds, stats, events);
             }
-          } else {
-            failedIds.add(chunk.id);
-            stats.failedChunks++;
-            hasFailure = true;
-            stopReason = `Chunk "${chunk.title}" failed: ${result.error || result.reviewFeedback}`;
-            cancelDependentChunks(chunk.id, chunk.title, 'failed', currentChunks, completedIds, failedIds, stats, events);
           }
         }
       }
@@ -441,6 +462,105 @@ export class SpecExecutionService {
     events?.onChunkComplete?.(chunk.id, result);
 
     return result;
+  }
+
+  private async runWaveExecution(
+    specId: string,
+    allChunks: Chunk[],
+    completedIds: Set<string>,
+    failedIds: Set<string>,
+    stats: SpecExecutionStats,
+    gitState?: GitWorkflowState,
+    events?: SpecExecutionEvents,
+    maxConcurrent = 3,
+  ): Promise<{ hasFailure: boolean; stopReason: string | null; wasAborted: boolean }> {
+    let hasFailure = false;
+    let stopReason: string | null = null;
+    let wasAborted = false;
+    let currentIndex = 0;
+
+    const pendingChunks = allChunks.filter(
+      (c) => c.status === 'pending' || c.status === 'failed' || c.status === 'cancelled'
+    );
+    const schedule = buildWaveSchedule(pendingChunks);
+
+    console.log(`[Execution] Parallel mode: ${schedule.waves.length} waves, maxConcurrent=${maxConcurrent}`);
+
+    for (const wave of schedule.waves) {
+      if (this.isAborted(specId) || hasFailure) {
+        if (this.isAborted(specId)) { wasAborted = true; stopReason = 'Aborted by user'; }
+        break;
+      }
+
+      const chunkIds = wave.chunks.map(c => c.id);
+      events?.onWaveStart?.(specId, wave.index, chunkIds);
+
+      if (!wave.parallel || wave.chunks.length === 1) {
+        // Single chunk or serialized — run sequentially
+        for (const chunk of wave.chunks) {
+          if (this.isAborted(specId) || hasFailure) {
+            if (this.isAborted(specId)) { wasAborted = true; stopReason = 'Aborted by user'; }
+            break;
+          }
+          currentIndex++;
+          const result = await this.runChunkWithRetry(chunk, specId, currentIndex, stats.totalChunks, gitState, events);
+          if (result.status === 'cancelled') { wasAborted = true; stopReason = 'Aborted by user'; break; }
+          if (result.status === 'pass') {
+            completedIds.add(chunk.id);
+            stats.passedChunks++;
+            if (result.commitHash) events?.onGitCommit?.(chunk.id, result.commitHash);
+          } else {
+            failedIds.add(chunk.id);
+            stats.failedChunks++;
+            hasFailure = true;
+            stopReason = `Chunk "${chunk.title}" failed: ${result.error || result.reviewFeedback}`;
+            const currentChunks = getChunksBySpec(specId);
+            cancelDependentChunks(chunk.id, chunk.title, 'failed', currentChunks, completedIds, failedIds, stats, events);
+          }
+        }
+      } else {
+        // Parallel wave execution
+        const chunkMap = new Map(wave.chunks.map(c => [c.id, c]));
+
+        const waveResult = await executeWave(
+          wave,
+          async (chunkId) => {
+            const chunk = chunkMap.get(chunkId);
+            if (!chunk) return { success: false, error: 'Chunk not found' };
+            const result = await this.runChunkWithRetry(chunk, specId, ++currentIndex, stats.totalChunks, gitState, events);
+            return {
+              success: result.status === 'pass',
+              output: result.output,
+              error: result.error || result.reviewFeedback,
+            };
+          },
+          { maxConcurrent },
+        );
+
+        events?.onWaveComplete?.(specId, wave.index, waveResult);
+
+        for (const r of waveResult.results) {
+          if (r.success) {
+            completedIds.add(r.chunkId);
+            stats.passedChunks++;
+          }
+        }
+
+        if (!waveResult.allPassed) {
+          const currentChunks = getChunksBySpec(specId);
+          for (const f of waveResult.failures) {
+            failedIds.add(f.chunkId);
+            stats.failedChunks++;
+            const chunk = chunkMap.get(f.chunkId);
+            cancelDependentChunks(f.chunkId, chunk?.title || f.chunkId, 'failed', currentChunks, completedIds, failedIds, stats, events);
+          }
+          hasFailure = true;
+          stopReason = `Wave ${wave.index}: ${waveResult.failures.length} chunk(s) failed`;
+        }
+      }
+    }
+
+    return { hasFailure, stopReason, wasAborted };
   }
 
   private async runFinalReview(
