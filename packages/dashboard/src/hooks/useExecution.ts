@@ -1,112 +1,25 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import type { Chunk, ChunkToolCall, ChunkStatus, ReviewResult, ReviewStatus, Spec } from '@specwright/shared';
+import type { ReviewResult } from '@specwright/shared';
+import {
+  POLL_INTERVAL_MS,
+  hasStatusChanged,
+  INITIAL_EXECUTION_STATE,
+  type ExecutionState,
+  type UseExecutionReturn,
+  type UseExecutionProps,
+} from '@/lib/execution/manager';
 
-/** Polling interval in milliseconds for chunk status updates */
-const POLL_INTERVAL_MS = 3000;
-
-/**
- * Compares chunk arrays to detect status changes by chunk id.
- * Returns true if any chunk's status or error field has changed,
- * or if chunks were added/removed.
- */
-function hasStatusChanged(oldChunks: Chunk[], newChunks: Chunk[]): boolean {
-  if (!oldChunks || !newChunks) return true;
-
-  // Build map from newChunks by id
-  const newChunkMap = new Map(newChunks.map(chunk => [chunk.id, chunk]));
-
-  // Check if any oldChunk has changed or is missing
-  for (const oldChunk of oldChunks) {
-    const newChunk = newChunkMap.get(oldChunk.id);
-    if (!newChunk) return true; // Chunk removed
-    if (oldChunk.status !== newChunk.status || oldChunk.error !== newChunk.error) {
-      return true;
-    }
-  }
-
-  // Check if newChunks contains any id not present in oldChunks
-  const oldChunkIds = new Set(oldChunks.map(chunk => chunk.id));
-  for (const newChunk of newChunks) {
-    if (!oldChunkIds.has(newChunk.id)) return true; // New chunk added
-  }
-
-  return false;
-}
-
-interface ExecutionState {
-  isRunning: boolean;
-  chunkId: string | null;
-  status: ChunkStatus | null;
-  toolCalls: ChunkToolCall[];
-  output: string;
-  error: string | null;
-  startedAt: number | null;
-  // Review state
-  isReviewing: boolean;
-  reviewResult: ReviewResult | null;
-  fixChunkId: string | null;
-}
-
-interface UseExecutionReturn {
-  state: ExecutionState;
-  runChunk: (chunkId: string) => Promise<void>;
-  abortChunk: (chunkId: string) => Promise<void>;
-  watchChunk: (chunkId: string) => void;
-  stopWatching: () => void;
-  // Review functions
-  reviewChunk: (chunkId: string) => Promise<ReviewResult | null>;
-  clearReview: () => void;
-  // Polling state
-  isPolling: boolean;
-  lastUpdate: Date | null;
-}
-
-interface UseExecutionProps {
-  specId?: string;
-  chunks?: Chunk[];
-  spec?: Spec;
-  onChunksUpdate?: (chunks: Chunk[]) => void;
-  onSpecUpdate?: (spec: Spec) => void;
-}
+// Re-export types for consumers
+export type { ExecutionState, UseExecutionReturn, UseExecutionProps } from '@/lib/execution/manager';
 
 /**
  * Hook for managing chunk execution with live SSE monitoring and automatic status polling.
- * Provides chunk execution controls, real-time tool call updates via Server-Sent Events,
- * and background polling for spec/chunk status changes.
- * 
- * @param props - Configuration options
- * @param props.specId - ID of the spec being executed
- * @param props.chunks - Array of chunks in the spec
- * @param props.spec - Spec object with status field
- * @param props.onChunksUpdate - Callback when chunk data is updated via polling
- * @param props.onSpecUpdate - Callback when spec data is updated via polling
- * @returns Hook state and functions
- * @returns {ExecutionState} state - Current execution state
- * @returns {(chunkId: string) => Promise<void>} runChunk - Start executing a chunk
- * @returns {(chunkId: string) => Promise<void>} abortChunk - Abort chunk execution
- * @returns {(chunkId: string) => void} watchChunk - Subscribe to chunk SSE events
- * @returns {() => void} stopWatching - Unsubscribe from SSE events
- * @returns {(chunkId: string) => Promise<ReviewResult | null>} reviewChunk - Review a completed chunk
- * @returns {() => void} clearReview - Clear review state
- * @returns {boolean} isPolling - Indicates if active polling is running for status updates
- * @returns {Date | null} lastUpdate - Timestamp of last successful status fetch
  */
 export function useExecution(props: UseExecutionProps = {}): UseExecutionReturn {
   const { specId, chunks, spec, onChunksUpdate, onSpecUpdate } = props;
-  const [state, setState] = useState<ExecutionState>({
-    isRunning: false,
-    chunkId: null,
-    status: null,
-    toolCalls: [],
-    output: '',
-    error: null,
-    startedAt: null,
-    isReviewing: false,
-    reviewResult: null,
-    fixChunkId: null,
-  });
+  const [state, setState] = useState<ExecutionState>(INITIAL_EXECUTION_STATE);
 
   const [isPolling, setIsPolling] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
@@ -115,16 +28,11 @@ export function useExecution(props: UseExecutionProps = {}): UseExecutionReturn 
   const watchingChunkIdRef = useRef<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  /**
-   * Determines if polling should be active based on execution status.
-   * Polling runs when spec is running OR any chunk is running.
-   */
   const shouldPoll = useMemo(() => {
     if (!chunks || !spec) return false;
     return spec.status === 'running' || chunks.some(chunk => chunk.status === 'running');
   }, [chunks, spec]);
 
-  // Cleanup event source
   const cleanup = useCallback(() => {
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
@@ -142,7 +50,6 @@ export function useExecution(props: UseExecutionProps = {}): UseExecutionReturn 
 
     const poll = async () => {
       if (!isMounted) return;
-
       if (document.visibilityState === 'hidden') return;
 
       abortControllerRef.current?.abort();
@@ -217,9 +124,7 @@ export function useExecution(props: UseExecutionProps = {}): UseExecutionReturn 
 
   // Watch a chunk's execution via SSE
   const watchChunk = useCallback((chunkId: string) => {
-    // Cleanup previous
     cleanup();
-
     watchingChunkIdRef.current = chunkId;
 
     const eventSource = new EventSource(`/api/chunks/${chunkId}/events`);
@@ -264,12 +169,10 @@ export function useExecution(props: UseExecutionProps = {}): UseExecutionReturn 
         setState(prev => {
           const existingIndex = prev.toolCalls.findIndex(tc => tc.id === data.toolCall.id);
           if (existingIndex >= 0) {
-            // Update existing
             const newToolCalls = [...prev.toolCalls];
             newToolCalls[existingIndex] = data.toolCall;
             return { ...prev, toolCalls: newToolCalls };
           } else {
-            // Add new
             return { ...prev, toolCalls: [...prev.toolCalls, data.toolCall] };
           }
         });
@@ -323,32 +226,17 @@ export function useExecution(props: UseExecutionProps = {}): UseExecutionReturn 
     });
 
     eventSource.onerror = () => {
-      // Connection error - might just be completed
       cleanup();
     };
   }, [cleanup]);
 
-  // Stop watching
   const stopWatching = useCallback(() => {
     cleanup();
-    setState({
-      isRunning: false,
-      chunkId: null,
-      status: null,
-      toolCalls: [],
-      output: '',
-      error: null,
-      startedAt: null,
-      isReviewing: false,
-      reviewResult: null,
-      fixChunkId: null,
-    });
+    setState(INITIAL_EXECUTION_STATE);
   }, [cleanup]);
 
-  // Run a chunk
   const runChunk = useCallback(async (chunkId: string) => {
     try {
-      // Start execution
       const response = await fetch(`/api/chunks/${chunkId}/run`, {
         method: 'POST',
       });
@@ -358,7 +246,6 @@ export function useExecution(props: UseExecutionProps = {}): UseExecutionReturn 
         throw new Error(data.error || 'Failed to start execution');
       }
 
-      // Start watching - reset review state as well
       setState({
         isRunning: true,
         chunkId,
@@ -372,7 +259,6 @@ export function useExecution(props: UseExecutionProps = {}): UseExecutionReturn 
         fixChunkId: null,
       });
 
-      // Give it a moment to start, then watch
       setTimeout(() => watchChunk(chunkId), 100);
     } catch (err) {
       setState(prev => ({
@@ -384,7 +270,6 @@ export function useExecution(props: UseExecutionProps = {}): UseExecutionReturn 
     }
   }, [watchChunk]);
 
-  // Abort a chunk
   const abortChunk = useCallback(async (chunkId: string) => {
     try {
       const response = await fetch(`/api/chunks/${chunkId}/abort`, {
@@ -409,12 +294,10 @@ export function useExecution(props: UseExecutionProps = {}): UseExecutionReturn 
     }
   }, [cleanup]);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => cleanup();
   }, [cleanup]);
 
-  // Review a completed chunk
   const reviewChunk = useCallback(async (chunkId: string): Promise<ReviewResult | null> => {
     try {
       setState(prev => ({
@@ -457,7 +340,6 @@ export function useExecution(props: UseExecutionProps = {}): UseExecutionReturn 
     }
   }, []);
 
-  // Clear review state
   const clearReview = useCallback(() => {
     setState(prev => ({
       ...prev,
