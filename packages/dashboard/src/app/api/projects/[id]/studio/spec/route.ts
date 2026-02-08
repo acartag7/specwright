@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { existsSync, mkdirSync } from 'fs';
 import { getProject } from '@/lib/db';
 import { getCodebaseContext, formatCodebaseContext } from '@/lib/codebase-analyzer';
-import { ClaudeClient } from '@specwright/mcp/client';
+import { ClaudeClient } from '@/lib/clients/claude-client';
 import type { GenerateSpecRequest } from '@specwright/shared';
 
 // Ensure directory exists, create if needed

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { existsSync } from 'fs';
 import { execSync } from 'child_process';
 import { getProject } from '@/lib/db';
-import { ClaudeClient } from '@specwright/mcp/client';
+import { ClaudeClient } from '@/lib/clients/claude-client';
 import { createCommit, checkGitRepo } from '@/lib/git';
 
 interface RouteContext {

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { existsSync, mkdirSync } from 'fs';
 import { getProject } from '@/lib/db';
-import { ClaudeClient } from '@specwright/mcp/client';
+import { ClaudeClient } from '@/lib/clients/claude-client';
 import type { RefineSpecRequest } from '@specwright/shared';
 
 // Ensure directory exists, create if needed

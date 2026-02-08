@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { existsSync, mkdirSync } from 'fs';
 import { getProject } from '@/lib/db';
 import { getCodebaseContext, formatCodebaseContext } from '@/lib/codebase-analyzer';
-import { ClaudeClient } from '@specwright/mcp/client';
+import { ClaudeClient } from '@/lib/clients/claude-client';
 import type { GenerateChunksRequest, ChunkSuggestion } from '@specwright/shared';
 
 // Ensure directory exists, create if needed
@@ -68,23 +68,42 @@ Return a JSON array:
     "id": "chunk_1",
     "title": "Initialize Next.js project with TypeScript and Tailwind",
     "description": "DETAILED STEP-BY-STEP INSTRUCTIONS - see example below",
+    "files": ["package.json", "tsconfig.json", "tailwind.config.ts"],
+    "verifyCommand": "pnpm tsc --noEmit",
+    "doneCriteria": "Project initializes with TypeScript and Tailwind configured",
     "dependencies": [],
     "selected": true,
-    "order": 1,
-    "files": ["package.json", "tsconfig.json", "tailwind.config.ts"],
-    "outputs": ["Next.js 14 project initialized", "TypeScript configured", "Tailwind CSS working"]
+    "order": 1
   },
   {
     "id": "chunk_2",
     "title": "Create User type definitions",
     "description": "DETAILED STEP-BY-STEP INSTRUCTIONS",
+    "files": ["src/types/user.ts"],
+    "verifyCommand": "pnpm tsc --noEmit",
+    "doneCriteria": "User and UserProfile types are exported and importable",
     "dependencies": ["chunk_1"],
     "selected": true,
-    "order": 2,
-    "files": ["src/types/user.ts"],
-    "outputs": ["User interface exported", "UserProfile type exported"]
+    "order": 2
   }
 ]
+
+## Field Requirements (ALL MANDATORY)
+
+### files (REQUIRED)
+- List ALL files this chunk will create or modify
+- Use exact paths relative to project root
+- Include test files if tests are part of this chunk
+
+### verifyCommand (REQUIRED)
+- Command to verify the chunk completed successfully
+- Must start with: pnpm, npm, yarn, bun, node, npx, tsc, jest, or vitest
+- Examples: "pnpm test src/auth", "pnpm tsc --noEmit", "pnpm lint src/components/Button.tsx"
+
+### doneCriteria (REQUIRED)
+- Clear, measurable success condition
+- Should be verifiable by a reviewer
+- Examples: "Login endpoint accepts email/password and returns JWT", "Button renders with all variants"
 
 ## CRITICAL: Description Format
 Each description MUST follow this exact structure:
@@ -110,9 +129,6 @@ Each description MUST follow this exact structure:
 - File created: src/types/user.ts with User interface
 - Function added: fetchUser in src/lib/api.ts
 - Exports available: User, fetchUser
-
-## Verification
-[How to verify this chunk worked - e.g., "Import User from src/types/user should resolve"]
 """
 
 ## Dependency Rules
@@ -126,15 +142,8 @@ Each description MUST follow this exact structure:
 ## Chunk Sizing Rules
 - Each chunk: ONE focused task (not multiple features)
 - 5-15 minutes of AI coding work
-- Clear input → output boundary
+- Clear input -> output boundary
 - Can be verified independently
-
-## Anti-Patterns to Avoid
-- ❌ "Create the authentication system" (too vague)
-- ❌ "Set up everything" (not specific)
-- ❌ "Implement user features" (multiple tasks bundled)
-- ✅ "Create POST /api/auth/login endpoint that accepts {email, password} and returns {token, user}"
-- ✅ "Add bcrypt password hashing to User model with hashPassword() and verifyPassword() methods"
 
 ## Existing Codebase Integration
 - Reference actual file paths from the codebase analysis above

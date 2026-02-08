@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSpec, getProject, updateSpec } from '@/lib/db';
-import { ClaudeClient } from '@specwright/mcp/client';
+import { ClaudeClient } from '@/lib/clients/claude-client';
 import type { RefineSpecRequest } from '@specwright/shared';
 
 interface RouteContext {

@@ -10,7 +10,7 @@
 
 import type { Chunk, Spec, ReviewStatus, ReviewResult } from '@specwright/shared';
 import { CLAUDE_MODELS, type ReviewerConfig } from '@specwright/shared';
-import { ClaudeClient } from '@specwright/mcp/client';
+import { ClaudeClient } from '@/lib/clients/claude-client';
 import { getChunk, updateChunk, insertFixChunk, getSpec, getChunksBySpec } from '../db';
 import { getProject } from '../db/projects';
 import { buildReviewPrompt, buildEnhancedReviewPrompt, parseReviewResult, type ValidationResultForPrompt } from '../prompts';

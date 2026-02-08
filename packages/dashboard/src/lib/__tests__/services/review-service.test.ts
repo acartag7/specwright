@@ -14,7 +14,7 @@ const { mockClaudeExecute, mockGetDb } = vi.hoisted(() => ({
 }));
 
 // Mock dependencies before importing the module under test
-vi.mock('@specwright/mcp/client', () => ({
+vi.mock('@/lib/clients/claude-client', () => ({
   ClaudeClient: vi.fn().mockImplementation(() => ({
     execute: mockClaudeExecute,
   })),

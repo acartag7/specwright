@@ -4,7 +4,7 @@
  * Manages running chunks through OpencodeClient (GLM)
  */
 
-import { OpencodeClient } from '@specwright/mcp/client';
+import { OpencodeClient } from '@/lib/clients/opencode-client';
 import type { Project, Spec, Chunk, ChunkToolCall, ToolCallEvent, EventHandler, ProjectConfig } from '@specwright/shared';
 import { DEFAULT_PROJECT_CONFIG, DEFAULT_CHUNK_TIMEOUT_MS } from '@specwright/shared';
 import { getChunk, updateChunk, createToolCall, updateToolCall, getProject, getSpec, getChunksBySpec } from './db';
