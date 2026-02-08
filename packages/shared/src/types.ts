@@ -36,6 +36,12 @@ export interface Spec {
   worktreeCreatedAt?: number;
   worktreeLastActivity?: number;
   prMerged?: boolean;
+  // Meta-spec fields (v2-03)
+  phaseId?: string;
+  additionalNotes?: string;
+  // Goal verification (v2-07)
+  goal?: string;
+  verifyGoal?: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -47,6 +53,12 @@ export interface Chunk {
   description: string;
   order: number;
   status: ChunkStatus;
+
+  // Structured format fields (v2-04)
+  files: string[];               // Files this chunk creates/modifies
+  verifyCommand: string;         // Command to verify completion
+  doneCriteria: string;          // Human-readable success criteria
+
   output?: string;
   outputSummary?: string;  // Concise summary of what was accomplished (for context passing)
   error?: string;
@@ -59,6 +71,59 @@ export interface Chunk {
   dependencies: string[];  // IDs of chunks this depends on
   // Git integration (ORC-21)
   commitHash?: string;
+  // Context tracking (v2-05)
+  archived?: boolean;
+  // Wiring verification (v2-07)
+  consumes?: string[];
+  creates?: string[];
+}
+
+// ============================================================================
+// Meta-Spec Types (v2-03)
+// ============================================================================
+
+export type PhaseStatus = 'not_started' | 'in_progress' | 'completed';
+
+export interface Phase {
+  id: string;
+  metaSpecId: string;
+  name: string;
+  description: string;
+  successCriteria: string[];
+  status: PhaseStatus;
+  orderIndex: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface MetaSpec {
+  id: string;
+  projectId: string;
+  vision: string;
+  architecture: string;
+  constraints: string;
+  nonGoals: string;
+  phases: Phase[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface StateSnapshot {
+  id: string;
+  projectId: string;
+  currentPhaseId: string | null;
+  currentSpecId: string | null;
+  currentChunkId: string | null;
+  recentActivity: ActivityEntry[];
+  blockers: string[];
+  notes: string;
+  updatedAt: number;
+}
+
+export interface ActivityEntry {
+  date: string;
+  description: string;
+  type: 'chunk_completed' | 'spec_completed' | 'decision' | 'note';
 }
 
 // Graph visualization types (Phase 3)
@@ -147,12 +212,19 @@ export interface UpdateProjectRequest {
 export interface CreateChunkRequest {
   title: string;
   description: string;
+  files: string[];
+  verifyCommand: string;
+  doneCriteria: string;
   order?: number;
+  dependencies?: string[];
 }
 
 export interface UpdateChunkRequest {
   title?: string;
   description?: string;
+  files?: string[];
+  verifyCommand?: string;
+  doneCriteria?: string;
   order?: number;
   dependencies?: string[];
 }
@@ -496,6 +568,7 @@ export interface Question {
   type: QuestionType;
   options?: string[];
   required: boolean;
+  context?: string;
 }
 
 export type QuestionType = 'text' | 'choice' | 'multiselect';
@@ -504,11 +577,12 @@ export interface ChunkSuggestion {
   id: string;
   title: string;
   description: string;
+  files: string[];
+  verifyCommand: string;
+  doneCriteria: string;
+  dependencies: string[];
   selected: boolean;
   order: number;
-  // New fields for better dependency tracking and context
-  dependencies?: string[];  // IDs of chunks this depends on
-  files?: string[];         // Files this chunk will create/modify
   outputs?: string[];       // Expected outputs/exports from this chunk
 }
 

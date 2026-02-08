@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import type { Question } from '@specwright/shared';
 import QuestionField from './QuestionField';
 
@@ -10,6 +11,8 @@ interface QuestionsStepProps {
   onBack: () => void;
   onNext: () => void;
   isGenerating: boolean;
+  additionalNotes?: string;
+  onAdditionalNotesChange?: (notes: string) => void;
 }
 
 export default function QuestionsStep({
@@ -19,8 +22,13 @@ export default function QuestionsStep({
   onBack,
   onNext,
   isGenerating,
+  additionalNotes = '',
+  onAdditionalNotesChange,
 }: QuestionsStepProps) {
-  // Check if all required questions are answered
+  const [expandedQuestions, setExpandedQuestions] = useState<Set<string>>(
+    () => new Set(questions.map((q) => q.id))
+  );
+
   const isValid = questions
     .filter((q) => q.required)
     .every((q) => {
@@ -30,6 +38,18 @@ export default function QuestionsStep({
       }
       return answer && String(answer).trim().length > 0;
     });
+
+  const toggleExpanded = (questionId: string) => {
+    setExpandedQuestions((prev) => {
+      const next = new Set(prev);
+      if (next.has(questionId)) {
+        next.delete(questionId);
+      } else {
+        next.add(questionId);
+      }
+      return next;
+    });
+  };
 
   return (
     <div className="space-y-6">
@@ -42,20 +62,96 @@ export default function QuestionsStep({
         </p>
       </div>
 
-      <div className="space-y-5">
-        {questions.map((question) => (
-          <QuestionField
-            key={question.id}
-            question={question}
-            value={answers[question.id] || (question.type === 'multiselect' ? [] : '')}
-            onChange={(value) => onAnswerChange(question.id, value)}
-          />
-        ))}
+      <div className="space-y-4">
+        {questions.map((question, index) => {
+          const isExpanded = expandedQuestions.has(question.id);
+          const hasAnswer = (() => {
+            const answer = answers[question.id];
+            if (question.type === 'multiselect') {
+              return Array.isArray(answer) && answer.length > 0;
+            }
+            return answer && String(answer).trim().length > 0;
+          })();
+
+          return (
+            <div
+              key={question.id}
+              className="bg-neutral-900/70 border border-neutral-800 rounded-lg overflow-hidden transition-colors hover:border-neutral-700"
+            >
+              {/* Question Header - clickable to expand/collapse */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  toggleExpanded(question.id);
+                }}
+                className="w-full px-5 py-4 flex items-center gap-3 text-left"
+              >
+                <span className="text-xs text-neutral-600 font-mono flex-shrink-0">
+                  {index + 1}/{questions.length}
+                </span>
+                <span className="flex-1 text-sm text-neutral-200 font-mono">
+                  {question.question}
+                  {question.required && <span className="text-red-400 ml-1">*</span>}
+                </span>
+                {hasAnswer && !isExpanded && (
+                  <span className="text-xs text-emerald-400/70 font-mono flex-shrink-0">
+                    answered
+                  </span>
+                )}
+                <svg
+                  className={`w-4 h-4 text-neutral-500 transition-transform flex-shrink-0 ${
+                    isExpanded ? 'rotate-180' : ''
+                  }`}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+
+              {/* Expandable Answer Area */}
+              {isExpanded && (
+                <div className="px-5 pb-5 space-y-3">
+                  <QuestionField
+                    question={{ ...question, question: '' }}
+                    value={answers[question.id] || (question.type === 'multiselect' ? [] : '')}
+                    onChange={(value) => onAnswerChange(question.id, value)}
+                  />
+
+                  {/* Why this matters - expandable info */}
+                  {question.context && (
+                    <WhyThisMatters context={question.context} />
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       {questions.length === 0 && (
         <div className="text-center py-8">
           <p className="text-neutral-500 font-mono text-sm">No questions generated yet.</p>
+        </div>
+      )}
+
+      {/* Additional Notes */}
+      {questions.length > 0 && (
+        <div className="bg-neutral-900/50 border border-neutral-800 rounded-lg p-5 space-y-3">
+          <label className="block text-sm text-neutral-300 font-mono">
+            Additional Notes
+            <span className="text-neutral-600 ml-2">(optional)</span>
+          </label>
+          <textarea
+            value={additionalNotes}
+            onChange={(e) => onAdditionalNotesChange?.(e.target.value)}
+            placeholder="Add any context, preferences, or details that weren't covered by the questions..."
+            className="w-full min-h-[80px] px-4 py-3 bg-neutral-950 border border-neutral-800 rounded-md text-neutral-300 placeholder:text-neutral-700 font-mono text-sm focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20 resize-y"
+            disabled={isGenerating}
+          />
         </div>
       )}
 
@@ -94,6 +190,43 @@ export default function QuestionsStep({
           )}
         </button>
       </div>
+    </div>
+  );
+}
+
+/** Expandable "Why this matters" info section */
+function WhyThisMatters({ context }: { context: string }) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  return (
+    <div className="pt-1">
+      <button
+        type="button"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setIsOpen(!isOpen);
+        }}
+        className="flex items-center gap-1.5 text-xs text-neutral-500 hover:text-neutral-400 font-mono transition-colors"
+      >
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        Why this matters
+        <svg
+          className={`w-3 h-3 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {isOpen && (
+        <p className="mt-2 text-xs text-neutral-500 font-mono leading-relaxed pl-5">
+          {context}
+        </p>
+      )}
     </div>
   );
 }
