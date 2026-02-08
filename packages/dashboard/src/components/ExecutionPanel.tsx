@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import type { Chunk, ChunkToolCall, ChunkStatus, ReviewResult, ReviewStatus } from '@specwright/shared';
+import type { ContextMetrics } from '@/lib/execution/types';
 import { DiffView } from './markdown';
+import { ContextWarnings } from './execution/ContextWarnings';
 
 interface ExecutionPanelProps {
   chunk: Chunk | null;
@@ -20,6 +22,7 @@ interface ExecutionPanelProps {
   onRunFix?: (chunkId: string) => void;
   onSkipReview?: () => void;
   onMarkDone?: () => void;
+  contextMetrics?: ContextMetrics | null;
 }
 
 const statusColors: Record<ChunkToolCall['status'], string> = {
@@ -82,6 +85,7 @@ export default function ExecutionPanel({
   onRunFix,
   onSkipReview,
   onMarkDone,
+  contextMetrics = null,
 }: ExecutionPanelProps) {
   const [elapsed, setElapsed] = useState(0);
   const [showFullOutput, setShowFullOutput] = useState(false);
@@ -172,6 +176,26 @@ export default function ExecutionPanel({
             )}
           </div>
         </div>
+
+        {/* Context Metrics */}
+        {contextMetrics && (
+          <div className="flex-shrink-0 p-3 border-b border-neutral-800/50">
+            <h3 className="text-[10px] font-mono text-neutral-600 uppercase mb-2">context usage</h3>
+            <ContextWarnings metrics={contextMetrics} className="mb-2" />
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[10px] font-mono text-neutral-500">
+              <span>system prompt</span>
+              <span className="text-right">{contextMetrics.estimated.breakdown.systemPrompt.toLocaleString()} tokens</span>
+              <span>spec content</span>
+              <span className="text-right">{contextMetrics.estimated.breakdown.specContent.toLocaleString()} tokens</span>
+              <span>chunk description</span>
+              <span className="text-right">{contextMetrics.estimated.breakdown.chunkDescription.toLocaleString()} tokens</span>
+              <span>dependency history</span>
+              <span className="text-right">{contextMetrics.estimated.breakdown.dependencyHistory.toLocaleString()} tokens</span>
+              <span className="text-neutral-400 font-medium border-t border-neutral-800 pt-1">total</span>
+              <span className="text-right text-neutral-400 font-medium border-t border-neutral-800 pt-1">{contextMetrics.estimated.total.toLocaleString()} / {contextMetrics.model.contextLimit.toLocaleString()}</span>
+            </div>
+          </div>
+        )}
 
         {/* Tool Calls */}
         <div className="flex-shrink-0 p-3 border-b border-neutral-800/50">

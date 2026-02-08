@@ -22,6 +22,8 @@ import { gitService, type GitWorkflowState } from '../git-workflow/service';
 import { WiringChecker } from '../services/goal-verifier/wiring-checker';
 import { executeWithRetry, type IterationConfig, type IterationResult } from '../execution/iteration-loop';
 import { loadConfig } from '../config/config-loader';
+import { calculateContextMetrics } from '../execution/context-tracker';
+import type { ContextMetrics } from '../execution/types';
 
 export interface ChunkPipelineResult {
   status: 'pass' | 'fail' | 'needs_fix' | 'error' | 'cancelled' | 'blocked';
@@ -31,6 +33,7 @@ export interface ChunkPipelineResult {
   fixChunkId?: string;
   error?: string;
   iterationResult?: IterationResult;
+  contextMetrics?: ContextMetrics;
 }
 
 export interface ChunkPipelineEvents {
@@ -42,6 +45,7 @@ export interface ChunkPipelineEvents {
   onReviewStart?: (chunkId: string) => void;
   onReviewComplete?: (chunkId: string, result: ChunkReviewResult) => void;
   onCommit?: (chunkId: string, commitHash: string) => void;
+  onContextWarning?: (chunkId: string, metrics: ContextMetrics) => void;
   onError?: (chunkId: string, error: string) => void;
 }
 
@@ -98,6 +102,49 @@ export class ChunkPipeline {
         events?.onError?.(chunkId, error);
         return { status: 'blocked', error };
       }
+    }
+
+    // Step 0b: Calculate context metrics before execution
+    let contextMetrics: ContextMetrics | undefined;
+    try {
+      const completedDeps = chunk.dependencies
+        .map(depId => getChunk(depId))
+        .filter((c): c is NonNullable<typeof c> => c != null && c.status === 'completed');
+
+      const dependencyHistory = completedDeps
+        .map(dep => {
+          const summary = dep.outputSummary || dep.output?.slice(0, 2000) || '';
+          return `### ${dep.title}\n${summary}`;
+        })
+        .join('\n');
+
+      const specContent = spec.content?.slice(0, 3000) || '';
+
+      contextMetrics = calculateContextMetrics(
+        {
+          systemPrompt: 'You are implementing part of a larger feature.',
+          specContent,
+          chunkDescription: `## ${chunk.title}\n\n${chunk.description}`,
+          dependencyHistory,
+        },
+        {
+          id: 'claude-sonnet-4-5-20250929',
+          name: 'Claude Sonnet 4.5',
+          provider: 'anthropic',
+          capabilities: { toolCall: true, attachment: true, reasoning: true },
+          limits: { context: 200000, output: 100000 },
+        }
+      );
+
+      console.log(
+        `[ChunkPipeline] Context: ${Math.round(contextMetrics.percentage * 100)}% (${contextMetrics.status})`
+      );
+
+      if (contextMetrics.status === 'poor') {
+        events?.onContextWarning?.(chunkId, contextMetrics);
+      }
+    } catch (err) {
+      console.warn(`[ChunkPipeline] Failed to calculate context metrics: ${err}`);
     }
 
     // Step 1: Execute chunk (with optional iteration loop)
@@ -158,7 +205,7 @@ export class ChunkPipeline {
     }
 
     if (executionResult.status === 'cancelled') {
-      return { status: 'cancelled', output: executionResult.output };
+      return { status: 'cancelled', output: executionResult.output, contextMetrics };
     }
 
     if (executionResult.status === 'failed') {
@@ -168,6 +215,7 @@ export class ChunkPipeline {
         output: executionResult.output,
         error: executionResult.error,
         iterationResult,
+        contextMetrics,
       };
     }
 
@@ -203,6 +251,7 @@ export class ChunkPipeline {
           output: executionResult.output,
           reviewFeedback: validationResult.autoFail.feedback,
           error: validationResult.autoFail.feedback,
+          contextMetrics,
         };
       }
     }
@@ -223,6 +272,7 @@ export class ChunkPipeline {
         status: 'error',
         output: executionResult.output,
         error: reviewResult.error,
+        contextMetrics,
       };
     }
 
@@ -264,6 +314,7 @@ export class ChunkPipeline {
         output: executionResult.output,
         reviewFeedback: reviewResult.feedback,
         fixChunkId: reviewResult.fixChunkId,
+        contextMetrics,
       };
     }
 
@@ -281,6 +332,7 @@ export class ChunkPipeline {
         status: 'fail',
         output: executionResult.output,
         reviewFeedback: reviewResult.feedback,
+        contextMetrics,
       };
     }
 
@@ -315,6 +367,7 @@ export class ChunkPipeline {
       output: executionResult.output,
       reviewFeedback: reviewResult.feedback,
       commitHash,
+      contextMetrics,
     };
   }
 
