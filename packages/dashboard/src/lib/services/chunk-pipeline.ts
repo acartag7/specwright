@@ -13,13 +13,15 @@
 import type { ChunkToolCall } from '@specwright/shared';
 import { getChunk, updateChunk, getSpec } from '../db';
 import { getProject } from '../db/projects';
+import { getContext, saveContext } from '../db/spec-execution-context';
 import { chunkExecutor, type ExecutionResult } from './chunk-executor';
 import { validationService, type ValidationResult } from './validation-service';
 import { reviewService, createReviewService, type ChunkReviewResult } from './review-service';
 import { gitService, type GitWorkflowState } from './git-service';
+import { WiringChecker } from './goal-verifier/wiring-checker';
 
 export interface ChunkPipelineResult {
-  status: 'pass' | 'fail' | 'needs_fix' | 'error' | 'cancelled';
+  status: 'pass' | 'fail' | 'needs_fix' | 'error' | 'cancelled' | 'blocked';
   output?: string;
   reviewFeedback?: string;
   commitHash?: string;
@@ -70,6 +72,29 @@ export class ChunkPipeline {
     const project = getProject(spec.projectId);
 
     console.log(`[ChunkPipeline] Starting pipeline for chunk: ${chunk.title}`);
+
+    // Step 0: Wiring check - validate cross-chunk dependencies
+    const hasConsumes = chunk.consumes && chunk.consumes.length > 0;
+    if (hasConsumes) {
+      const wiringChecker = new WiringChecker(chunk.specId);
+
+      // Load accumulated context from database
+      const existingContext = getContext(chunk.specId);
+      if (existingContext) {
+        wiringChecker.loadContext(existingContext);
+      }
+
+      const wiringResult = wiringChecker.checkWiring(chunk);
+      if (!wiringResult.canExecute) {
+        const missing = wiringResult.missingImports
+          .map(m => `${m.name} (required by ${m.requiredBy}${m.suggestion ? ': ' + m.suggestion : ''})`)
+          .join('; ');
+        const error = `Wiring check failed: missing imports: ${missing}`;
+        console.log(`[ChunkPipeline] ${error}`);
+        events?.onError?.(chunkId, error);
+        return { status: 'blocked', error };
+      }
+    }
 
     // Step 1: Execute chunk
     events?.onExecutionStart?.(chunkId);
@@ -202,6 +227,29 @@ export class ChunkPipeline {
         output: executionResult.output,
         reviewFeedback: reviewResult.feedback,
       };
+    }
+
+    // Step 5b: Accumulate context after successful execution
+    const workingDirForWiring = gitState?.workingDir || project?.directory;
+    if (workingDirForWiring) {
+      try {
+        const wiringChecker = new WiringChecker(chunk.specId);
+        const existingContext = getContext(chunk.specId);
+        if (existingContext) {
+          wiringChecker.loadContext(existingContext);
+        }
+
+        const createdExports = await wiringChecker.extractCreatedExports(
+          chunkId,
+          workingDirForWiring
+        );
+        wiringChecker.recordChunkCompletion(chunk, createdExports);
+        saveContext(chunk.specId, wiringChecker.getContext());
+        console.log(`[ChunkPipeline] Accumulated ${createdExports.length} exports from chunk`);
+      } catch (err) {
+        console.warn(`[ChunkPipeline] Failed to accumulate context: ${err}`);
+        // Don't fail the pipeline for context accumulation errors
+      }
     }
 
     // Success!

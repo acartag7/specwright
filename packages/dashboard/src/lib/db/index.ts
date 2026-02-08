@@ -27,3 +27,9 @@ export { getReviewLogsBySpec, getReviewLogsByChunk, getReviewWarningsForSpec } f
 
 // Spec execution context operations (v2-07)
 export { getContext as getSpecExecutionContext, saveContext as saveSpecExecutionContext, clearContext as clearSpecExecutionContext } from './spec-execution-context';
+
+// Meta-spec operations (v2-03, ORC-67)
+export { getMetaSpecByProject, createMetaSpec, updateMetaSpec, deleteMetaSpec, createPhase, updatePhase, deletePhase, reorderPhases } from './meta-specs';
+
+// State snapshot operations (v2-03, ORC-70)
+export { getStateByProject, createOrUpdateState, addActivity } from './state-snapshots';
