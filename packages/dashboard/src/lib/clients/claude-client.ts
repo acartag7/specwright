@@ -17,7 +17,7 @@ import type {
   TokenUsage,
 } from "@specwright/shared";
 
-const DEFAULT_MODEL = "claude-opus-4-5-20251101";
+const DEFAULT_MODEL = "claude-opus-4-6";
 const DEFAULT_TIMEOUT_MS = 300000; // 5 minutes
 
 // Use CLAUDE_PATH env var if set, otherwise assume 'claude' is in PATH
