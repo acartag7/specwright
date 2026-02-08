@@ -105,6 +105,9 @@ describe('SpecExecutionService', () => {
     description: 'Test description',
     order: 0,
     status: 'pending',
+    files: [],
+    verifyCommand: '',
+    doneCriteria: '',
     dependencies: [],
     ...overrides,
   });

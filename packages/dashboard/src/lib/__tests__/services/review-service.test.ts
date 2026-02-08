@@ -65,6 +65,9 @@ describe('ReviewService', () => {
     description: 'Test description',
     order: 0,
     status: 'running',
+    files: [],
+    verifyCommand: '',
+    doneCriteria: '',
     dependencies: [],
   };
 
@@ -74,7 +77,7 @@ describe('ReviewService', () => {
     title: 'Test Spec',
     content: 'Test spec content',
     version: 1,
-    status: 'in_progress',
+    status: 'running',
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
@@ -87,6 +90,9 @@ describe('ReviewService', () => {
       description: 'First chunk',
       order: 0,
       status: 'completed',
+      files: [],
+      verifyCommand: '',
+      doneCriteria: '',
       dependencies: [],
       reviewStatus: 'pass',
       outputSummary: 'Created main feature',
@@ -98,6 +104,9 @@ describe('ReviewService', () => {
       description: 'Second chunk',
       order: 1,
       status: 'completed',
+      files: [],
+      verifyCommand: '',
+      doneCriteria: '',
       dependencies: ['chunk-1'],
       reviewStatus: 'pass',
       outputSummary: 'Added tests',
@@ -269,6 +278,9 @@ describe('ReviewService', () => {
         description: 'Add unit tests',
         order: 1,
         status: 'pending',
+        files: [],
+        verifyCommand: '',
+        doneCriteria: '',
         dependencies: ['chunk-1'],
       });
 
@@ -375,6 +387,9 @@ describe('ReviewService', () => {
           description: 'First fix',
           order: 2,
           status: 'pending',
+          files: [],
+          verifyCommand: '',
+          doneCriteria: '',
           dependencies: ['chunk-2'],
         })
         .mockReturnValueOnce({
@@ -384,6 +399,9 @@ describe('ReviewService', () => {
           description: 'Second fix',
           order: 3,
           status: 'pending',
+          files: [],
+          verifyCommand: '',
+          doneCriteria: '',
           dependencies: ['fix-1'],
         });
 
@@ -405,6 +423,9 @@ describe('ReviewService', () => {
         description: 'Fix integration issues',
         order: 2,
         status: 'pending',
+        files: [],
+        verifyCommand: '',
+        doneCriteria: '',
         dependencies: ['chunk-2'],
       });
 
@@ -425,9 +446,9 @@ describe('ReviewService', () => {
       ];
 
       vi.mocked(insertFixChunk)
-        .mockReturnValueOnce({ id: 'fix-a', specId: 'spec-1', title: 'Fix A', description: '', order: 2, status: 'pending', dependencies: [] })
-        .mockReturnValueOnce({ id: 'fix-b', specId: 'spec-1', title: 'Fix B', description: '', order: 3, status: 'pending', dependencies: [] })
-        .mockReturnValueOnce({ id: 'fix-c', specId: 'spec-1', title: 'Fix C', description: '', order: 4, status: 'pending', dependencies: [] });
+        .mockReturnValueOnce({ id: 'fix-a', specId: 'spec-1', title: 'Fix A', description: '', order: 2, status: 'pending', files: [], verifyCommand: '', doneCriteria: '', dependencies: [] })
+        .mockReturnValueOnce({ id: 'fix-b', specId: 'spec-1', title: 'Fix B', description: '', order: 3, status: 'pending', files: [], verifyCommand: '', doneCriteria: '', dependencies: [] })
+        .mockReturnValueOnce({ id: 'fix-c', specId: 'spec-1', title: 'Fix C', description: '', order: 4, status: 'pending', files: [], verifyCommand: '', doneCriteria: '', dependencies: [] });
 
       const result = await reviewService.createFixChunks('spec-1', fixes);
 
@@ -456,6 +477,9 @@ describe('ReviewService', () => {
         description: 'Fix for first chunk',
         order: 2,
         status: 'pending',
+        files: [],
+        verifyCommand: '',
+        doneCriteria: '',
         dependencies: ['chunk-1'],
       });
 
@@ -480,6 +504,9 @@ describe('ReviewService', () => {
         description: 'Fix for specific chunk',
         order: 2,
         status: 'pending',
+        files: [],
+        verifyCommand: '',
+        doneCriteria: '',
         dependencies: ['chunk-1'],
       });
 

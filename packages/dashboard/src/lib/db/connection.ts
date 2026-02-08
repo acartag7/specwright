@@ -3,7 +3,7 @@ import path from 'path';
 import os from 'os';
 import { existsSync, mkdirSync } from 'fs';
 import { randomUUID } from 'crypto';
-import { MVP_SCHEMA, MIGRATIONS_PHASE2, MIGRATIONS_REVIEW_LOOP, MIGRATIONS_PHASE3_DEPS, MIGRATIONS_OUTPUT_SUMMARY, MIGRATIONS_PHASE4_WORKERS, MIGRATIONS_CONFIG_SYSTEM, MIGRATIONS_CASCADE_DELETE, MIGRATIONS_GIT_INTEGRATION, MIGRATIONS_WORKTREES } from '@specwright/shared';
+import { MVP_SCHEMA, MIGRATIONS_PHASE2, MIGRATIONS_REVIEW_LOOP, MIGRATIONS_PHASE3_DEPS, MIGRATIONS_OUTPUT_SUMMARY, MIGRATIONS_PHASE4_WORKERS, MIGRATIONS_CONFIG_SYSTEM, MIGRATIONS_CASCADE_DELETE, MIGRATIONS_GIT_INTEGRATION, MIGRATIONS_WORKTREES, MIGRATIONS_CHUNK_FORMAT_V2, MIGRATIONS_META_SPEC, MIGRATIONS_META_SPEC_COLUMNS, MIGRATIONS_CHUNK_ARCHIVE, MIGRATIONS_GOAL_VERIFICATION } from '@specwright/shared';
 
 const DB_DIR = path.join(os.homedir(), '.specwright');
 const DB_PATH = process.env.DB_PATH || path.join(DB_DIR, 'orchestrator.db');
@@ -54,6 +54,18 @@ export function getDb(): DatabaseType {
 
   // Run Worktree migrations (ORC-29)
   runWorktreeMigrations(db);
+
+  // Run Chunk Format v2 migrations (v2-04)
+  runChunkFormatV2Migrations(db);
+
+  // Run Meta-Spec migrations (v2-03, ORC-66)
+  runMetaSpecMigrations(db);
+
+  // Run Chunk Archive migrations (v2-05, ORC-88)
+  runChunkArchiveMigrations(db);
+
+  // Run Goal Verification migrations (v2-07, ORC-106)
+  runGoalVerificationMigrations(db);
 
   return db;
 }
@@ -395,6 +407,111 @@ function runWorktreeMigrations(database: DatabaseType): void {
     }
 
     console.log('Worktree migrations completed');
+  }
+}
+
+function runChunkFormatV2Migrations(database: DatabaseType): void {
+  const tableInfo = database.prepare(`PRAGMA table_info(chunks)`).all() as { name: string }[];
+  const hasFilesColumn = tableInfo.some(col => col.name === 'files');
+  const hasVerifyCommandColumn = tableInfo.some(col => col.name === 'verify_command');
+  const hasDoneCriteriaColumn = tableInfo.some(col => col.name === 'done_criteria');
+
+  if (hasFilesColumn && hasVerifyCommandColumn && hasDoneCriteriaColumn) {
+    return;
+  }
+
+  for (const migration of MIGRATIONS_CHUNK_FORMAT_V2) {
+    try {
+      database.exec(migration);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!message.includes('duplicate column')) {
+        console.warn(`Migration warning: ${message}`);
+      }
+    }
+  }
+}
+
+function runMetaSpecMigrations(database: DatabaseType): void {
+  // Check if meta_specs table already exists
+  const tables = database.prepare(
+    `SELECT name FROM sqlite_master WHERE type='table' AND name='meta_specs'`
+  ).all();
+
+  if (tables.length === 0) {
+    for (const migration of MIGRATIONS_META_SPEC) {
+      try {
+        database.exec(migration);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (!message.includes('already exists')) {
+          console.warn(`Migration warning: ${message}`);
+        }
+      }
+    }
+  }
+
+  // Add columns to specs and projects tables
+  const specsTableInfo = database.prepare(`PRAGMA table_info(specs)`).all() as { name: string }[];
+  const hasPhaseId = specsTableInfo.some(col => col.name === 'phase_id');
+
+  if (!hasPhaseId) {
+    for (const migration of MIGRATIONS_META_SPEC_COLUMNS) {
+      try {
+        database.exec(migration);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (!message.includes('duplicate column')) {
+          console.warn(`Migration warning: ${message}`);
+        }
+      }
+    }
+  }
+}
+
+function runChunkArchiveMigrations(database: DatabaseType): void {
+  const tableInfo = database.prepare(`PRAGMA table_info(chunks)`).all() as { name: string }[];
+  const hasArchivedColumn = tableInfo.some(col => col.name === 'archived');
+
+  if (!hasArchivedColumn) {
+    for (const migration of MIGRATIONS_CHUNK_ARCHIVE) {
+      try {
+        database.exec(migration);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (!message.includes('duplicate column') && !message.includes('already exists')) {
+          console.warn(`Migration warning: ${message}`);
+        }
+      }
+    }
+  }
+}
+
+function runGoalVerificationMigrations(database: DatabaseType): void {
+  // Check if spec_execution_context table exists
+  const tables = database.prepare(
+    `SELECT name FROM sqlite_master WHERE type='table' AND name='spec_execution_context'`
+  ).all();
+
+  const specsTableInfo = database.prepare(`PRAGMA table_info(specs)`).all() as { name: string }[];
+  const hasGoalColumn = specsTableInfo.some(col => col.name === 'goal');
+
+  const chunksTableInfo = database.prepare(`PRAGMA table_info(chunks)`).all() as { name: string }[];
+  const hasConsumesColumn = chunksTableInfo.some(col => col.name === 'consumes');
+
+  if (tables.length > 0 && hasGoalColumn && hasConsumesColumn) {
+    return;
+  }
+
+  for (const migration of MIGRATIONS_GOAL_VERIFICATION) {
+    try {
+      database.exec(migration);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!message.includes('duplicate column') && !message.includes('already exists')) {
+        console.warn(`Migration warning: ${message}`);
+      }
+    }
   }
 }
 

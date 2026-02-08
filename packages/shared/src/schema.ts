@@ -483,12 +483,86 @@ export const MIGRATIONS_CASCADE_DELETE = [
 ];
 
 /**
+ * Migration queries for Chunk Format v2 (v2-04)
+ * Adds files, verify_command, done_criteria columns to chunks table
+ */
+export const MIGRATIONS_CHUNK_FORMAT_V2 = [
+  `ALTER TABLE chunks ADD COLUMN files TEXT NOT NULL DEFAULT '[]'`,
+  `ALTER TABLE chunks ADD COLUMN verify_command TEXT NOT NULL DEFAULT ''`,
+  `ALTER TABLE chunks ADD COLUMN done_criteria TEXT NOT NULL DEFAULT ''`,
+];
+
+/**
  * Migration queries for Git Integration (ORC-21)
  * Adds original_branch column to specs table and commit_hash column to chunks table
  */
 export const MIGRATIONS_GIT_INTEGRATION = [
   `ALTER TABLE specs ADD COLUMN original_branch TEXT`,
   `ALTER TABLE chunks ADD COLUMN commit_hash TEXT`,
+];
+
+/**
+ * Migration queries for Meta-Spec tables (v2-03, ORC-66)
+ * Creates meta_specs, phases, and state_snapshots tables
+ */
+export const MIGRATIONS_META_SPEC = [
+  `CREATE TABLE IF NOT EXISTS meta_specs (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL UNIQUE,
+    vision TEXT NOT NULL DEFAULT '',
+    architecture TEXT NOT NULL DEFAULT '',
+    constraints TEXT NOT NULL DEFAULT '',
+    non_goals TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_meta_specs_project ON meta_specs(project_id)`,
+  `CREATE TABLE IF NOT EXISTS phases (
+    id TEXT PRIMARY KEY,
+    meta_spec_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    success_criteria TEXT NOT NULL DEFAULT '[]',
+    status TEXT NOT NULL DEFAULT 'not_started',
+    order_index INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    FOREIGN KEY (meta_spec_id) REFERENCES meta_specs(id) ON DELETE CASCADE
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_phases_meta_spec ON phases(meta_spec_id)`,
+  `CREATE TABLE IF NOT EXISTS state_snapshots (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    current_phase_id TEXT,
+    current_spec_id TEXT,
+    current_chunk_id TEXT,
+    recent_activity TEXT NOT NULL DEFAULT '[]',
+    blockers TEXT NOT NULL DEFAULT '[]',
+    notes TEXT NOT NULL DEFAULT '',
+    updated_at INTEGER NOT NULL,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_state_project ON state_snapshots(project_id)`,
+];
+
+/**
+ * Migration queries for Meta-Spec column additions (v2-03, ORC-66)
+ * Adds phase_id and additional_notes to specs, studio_model to projects
+ */
+export const MIGRATIONS_META_SPEC_COLUMNS = [
+  `ALTER TABLE specs ADD COLUMN phase_id TEXT REFERENCES phases(id) ON DELETE SET NULL`,
+  `ALTER TABLE specs ADD COLUMN additional_notes TEXT DEFAULT ''`,
+  `ALTER TABLE projects ADD COLUMN studio_model TEXT DEFAULT 'opus'`,
+];
+
+/**
+ * Migration queries for Chunk Archiving (v2-05, ORC-88)
+ * Adds archived column to chunks table
+ */
+export const MIGRATIONS_CHUNK_ARCHIVE = [
+  `ALTER TABLE chunks ADD COLUMN archived INTEGER DEFAULT 0`,
+  `CREATE INDEX IF NOT EXISTS idx_chunks_archived ON chunks(spec_id, archived)`,
 ];
 
 /**
@@ -500,4 +574,25 @@ export const MIGRATIONS_WORKTREES = [
   `ALTER TABLE specs ADD COLUMN worktree_created_at INTEGER`,
   `ALTER TABLE specs ADD COLUMN worktree_last_activity INTEGER`,
   `ALTER TABLE specs ADD COLUMN pr_merged INTEGER DEFAULT 0`,
+];
+
+/**
+ * Migration queries for Goal Verification (v2-07, ORC-106)
+ * Creates spec_execution_context table and adds goal fields to specs
+ */
+export const MIGRATIONS_GOAL_VERIFICATION = [
+  `CREATE TABLE IF NOT EXISTS spec_execution_context (
+    id TEXT PRIMARY KEY,
+    spec_id TEXT NOT NULL,
+    accumulated_exports TEXT NOT NULL DEFAULT '[]',
+    files_created TEXT NOT NULL DEFAULT '[]',
+    files_modified TEXT NOT NULL DEFAULT '[]',
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (spec_id) REFERENCES specs(id) ON DELETE CASCADE
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_spec_exec_ctx_spec ON spec_execution_context(spec_id)`,
+  `ALTER TABLE specs ADD COLUMN goal TEXT`,
+  `ALTER TABLE specs ADD COLUMN verify_goal INTEGER DEFAULT 1`,
+  `ALTER TABLE chunks ADD COLUMN consumes TEXT DEFAULT '[]'`,
+  `ALTER TABLE chunks ADD COLUMN creates TEXT DEFAULT '[]'`,
 ];

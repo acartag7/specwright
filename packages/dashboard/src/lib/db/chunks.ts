@@ -1,4 +1,4 @@
-import type { Chunk, ReviewStatus } from '@specwright/shared';
+import type { Chunk, CreateChunkRequest, ReviewStatus } from '@specwright/shared';
 import { getDb, generateId } from './connection';
 
 interface ChunkRow {
@@ -8,6 +8,9 @@ interface ChunkRow {
   description: string;
   order: number;
   status: string;
+  files: string;
+  verify_command: string;
+  done_criteria: string;
   output: string | null;
   output_summary: string | null;
   error: string | null;
@@ -17,9 +20,28 @@ interface ChunkRow {
   review_feedback: string | null;
   dependencies: string | null;
   commit_hash: string | null;
+  archived: number | null;
+  consumes: string | null;
+  creates: string | null;
+}
+
+function safeJsonParse(value: string | null, fallback: string[] = []): string[] {
+  if (!value) return fallback;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
 }
 
 function rowToChunk(row: ChunkRow): Chunk {
+  let files: string[] = [];
+  try {
+    files = JSON.parse(row.files);
+  } catch {
+    files = [];
+  }
+
   let dependencies: string[] = [];
   try {
     dependencies = row.dependencies ? JSON.parse(row.dependencies) : [];
@@ -34,6 +56,9 @@ function rowToChunk(row: ChunkRow): Chunk {
     description: row.description,
     order: row.order,
     status: row.status as Chunk['status'],
+    files,
+    verifyCommand: row.verify_command ?? '',
+    doneCriteria: row.done_criteria ?? '',
     output: row.output ?? undefined,
     outputSummary: row.output_summary ?? undefined,
     error: row.error ?? undefined,
@@ -43,6 +68,9 @@ function rowToChunk(row: ChunkRow): Chunk {
     reviewFeedback: row.review_feedback ?? undefined,
     dependencies,
     commitHash: row.commit_hash ?? undefined,
+    archived: row.archived === 1 ? true : undefined,
+    consumes: safeJsonParse(row.consumes),
+    creates: safeJsonParse(row.creates),
   };
 }
 
@@ -62,7 +90,7 @@ export function getChunk(id: string): Chunk | null {
   return row ? rowToChunk(row) : null;
 }
 
-export function createChunk(specId: string, data: { title: string; description: string; order?: number; dependencies?: string[] }): Chunk {
+export function createChunk(specId: string, data: CreateChunkRequest): Chunk {
   const database = getDb();
   const id = generateId();
 
@@ -77,18 +105,31 @@ export function createChunk(specId: string, data: { title: string; description: 
   const dependencies = data.dependencies ?? [];
 
   const stmt = database.prepare(`
-    INSERT INTO chunks (id, spec_id, title, description, "order", status, dependencies)
-    VALUES (?, ?, ?, ?, ?, 'pending', ?)
+    INSERT INTO chunks (id, spec_id, title, description, "order", status, files, verify_command, done_criteria, dependencies)
+    VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
   `);
-  stmt.run(id, specId, data.title, data.description, order, JSON.stringify(dependencies));
+  stmt.run(
+    id,
+    specId,
+    data.title.trim(),
+    data.description.trim(),
+    order,
+    JSON.stringify(data.files),
+    data.verifyCommand.trim(),
+    data.doneCriteria.trim(),
+    JSON.stringify(dependencies)
+  );
 
   return {
     id,
     specId,
-    title: data.title,
-    description: data.description,
+    title: data.title.trim(),
+    description: data.description.trim(),
     order,
     status: 'pending',
+    files: data.files,
+    verifyCommand: data.verifyCommand.trim(),
+    doneCriteria: data.doneCriteria.trim(),
     dependencies,
   };
 }
@@ -96,6 +137,9 @@ export function createChunk(specId: string, data: { title: string; description: 
 export function updateChunk(id: string, data: {
   title?: string;
   description?: string;
+  files?: string[];
+  verifyCommand?: string;
+  doneCriteria?: string;
   order?: number;
   status?: Chunk['status'];
   output?: string;
@@ -112,7 +156,9 @@ export function updateChunk(id: string, data: {
 
   const stmt = database.prepare(`
     UPDATE chunks
-    SET title = ?, description = ?, "order" = ?, status = ?, output = ?, output_summary = ?, error = ?,
+    SET title = ?, description = ?, "order" = ?, status = ?,
+        files = ?, verify_command = ?, done_criteria = ?,
+        output = ?, output_summary = ?, error = ?,
         started_at = CASE WHEN ? = 'running' AND started_at IS NULL THEN ? ELSE started_at END,
         completed_at = CASE WHEN ? IN ('completed', 'failed') AND completed_at IS NULL THEN ? ELSE completed_at END,
         review_status = ?, review_feedback = ?, dependencies = ?, commit_hash = ?
@@ -122,12 +168,16 @@ export function updateChunk(id: string, data: {
   const now = Date.now();
   const newStatus = data.status ?? existing.status;
   const newDependencies = data.dependencies ?? existing.dependencies;
+  const newFiles = data.files ?? existing.files;
 
   stmt.run(
     data.title ?? existing.title,
     data.description ?? existing.description,
     data.order ?? existing.order,
     newStatus,
+    JSON.stringify(newFiles),
+    data.verifyCommand ?? existing.verifyCommand,
+    data.doneCriteria ?? existing.doneCriteria,
     data.output ?? existing.output ?? null,
     data.outputSummary ?? existing.outputSummary ?? null,
     data.error ?? existing.error ?? null,
@@ -188,8 +238,8 @@ export function insertFixChunk(afterChunkId: string, fixData: { title: string; d
   `);
 
   const insertStmt = database.prepare(`
-    INSERT INTO chunks (id, spec_id, title, description, "order", status, dependencies)
-    VALUES (?, ?, ?, ?, ?, 'pending', ?)
+    INSERT INTO chunks (id, spec_id, title, description, "order", status, files, verify_command, done_criteria, dependencies)
+    VALUES (?, ?, ?, ?, ?, 'pending', '[]', '', '', ?)
   `);
 
   // Wrap shift and insert in a transaction for atomicity
@@ -206,6 +256,33 @@ export function insertFixChunk(afterChunkId: string, fixData: { title: string; d
     description: fixData.description,
     order: newOrder,
     status: 'pending',
+    files: [],
+    verifyCommand: '',
+    doneCriteria: '',
     dependencies,
   };
+}
+
+// ============================================================================
+// Chunk Archiving (v2-05, ORC-88)
+// ============================================================================
+
+export function archiveChunk(id: string): void {
+  const database = getDb();
+  database.prepare('UPDATE chunks SET archived = 1 WHERE id = ?').run(id);
+}
+
+export function unarchiveChunk(id: string): void {
+  const database = getDb();
+  database.prepare('UPDATE chunks SET archived = 0 WHERE id = ?').run(id);
+}
+
+export function getActiveChunksForSpec(specId: string): Chunk[] {
+  const database = getDb();
+  const stmt = database.prepare(`
+    SELECT * FROM chunks
+    WHERE spec_id = ? AND (archived IS NULL OR archived = 0)
+    ORDER BY "order" ASC
+  `);
+  return (stmt.all(specId) as ChunkRow[]).map(rowToChunk);
 }
