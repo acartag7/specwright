@@ -18,6 +18,8 @@ import { getProject } from '../db/projects';
 import { chunkPipeline, type ChunkPipelineEvents, type ChunkPipelineResult } from '../services/chunk-pipeline';
 import { gitService, type GitWorkflowState } from '../services/git-service';
 import { reviewService, createReviewService, type FinalReviewResult, type FixSpec } from '../services/review-service';
+import { goalVerifierService } from '../services/goal-verifier';
+import type { GoalVerificationResult } from '../services/goal-verifier/types';
 import type { ValidationResult } from '../services/validation-service';
 import type { ChunkReviewResult } from '../review';
 import {
@@ -55,6 +57,8 @@ export interface SpecExecutionEvents extends Omit<ChunkPipelineEvents, 'onExecut
   onFinalReviewStart?: (specId: string) => void;
   onFinalReviewComplete?: (specId: string, result: FinalReviewResult) => void;
   onFinalReviewFixChunks?: (specId: string, fixChunkIds: string[]) => void;
+  onGoalVerificationStart?: (specId: string) => void;
+  onGoalVerificationComplete?: (specId: string, result: GoalVerificationResult) => void;
 }
 
 export interface SpecExecutionStats {
@@ -65,6 +69,7 @@ export interface SpecExecutionStats {
   fixChunksCreated: number;
   prUrl?: string;
   prNumber?: number;
+  goalVerification?: GoalVerificationResult;
   durationMs: number;
 }
 
@@ -302,6 +307,22 @@ export class SpecExecutionService {
         const { result: finalReviewResult, reviewSvc } = await this.runFinalReview(specId, gitState, stats, events);
 
         if (finalReviewResult.status === 'pass') {
+          // Run goal verification if enabled for this spec
+          const latestSpec = getSpec(specId);
+          if (latestSpec?.verifyGoal && latestSpec?.goal) {
+            events?.onGoalVerificationStart?.(specId);
+            const goalResult = await goalVerifierService.verifyGoal(specId);
+            stats.goalVerification = goalResult;
+            events?.onGoalVerificationComplete?.(specId, goalResult);
+
+            if (goalResult.status === 'needs_fix' && goalResult.fixChunks) {
+              console.log(`[GoalVerifier] Suggestions: ${goalResult.fixChunks.length} fix chunks`);
+            }
+            if (goalResult.status === 'fail') {
+              console.log(`[GoalVerifier] Goal verification FAILED: ${goalResult.goalAlignment.explanation}`);
+            }
+          }
+
           if (gitState?.enabled && spec) {
             const prResult = await gitService.pushAndCreatePR(gitState, spec, stats.passedChunks);
             if (prResult.success && prResult.prUrl) {

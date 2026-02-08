@@ -596,3 +596,12 @@ export const MIGRATIONS_GOAL_VERIFICATION = [
   `ALTER TABLE chunks ADD COLUMN consumes TEXT DEFAULT '[]'`,
   `ALTER TABLE chunks ADD COLUMN creates TEXT DEFAULT '[]'`,
 ];
+
+/**
+ * Migration queries for Parallel Execution / Wave Scheduler (v2-08, ORC-108)
+ * Adds wave column to chunks table for tracking execution wave assignment
+ */
+export const MIGRATIONS_WAVE_SCHEDULER = [
+  `ALTER TABLE chunks ADD COLUMN wave INTEGER DEFAULT NULL`,
+  `CREATE INDEX IF NOT EXISTS idx_chunks_wave ON chunks(spec_id, wave)`,
+];

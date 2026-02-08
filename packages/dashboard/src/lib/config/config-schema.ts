@@ -26,6 +26,12 @@ const rulesSchema = z.object({
   requireReview: z.boolean().default(false),
 });
 
+const parallelSchema = z.object({
+  enabled: z.boolean().default(true),
+  maxConcurrent: z.number().min(1).max(10).default(3),
+  autoSerializeOverlap: z.boolean().default(true),
+});
+
 export const specwrightConfigSchema = z.object({
   providers: z.record(z.string(), providerConfigSchema).default(() => ({})),
   defaults: defaultsSchema.default(() => ({
@@ -37,6 +43,11 @@ export const specwrightConfigSchema = z.object({
     maxFileSize: 300,
     shellSafety: true,
     requireReview: false,
+  })),
+  parallel: parallelSchema.default(() => ({
+    enabled: true,
+    maxConcurrent: 3,
+    autoSerializeOverlap: true,
   })),
 });
 

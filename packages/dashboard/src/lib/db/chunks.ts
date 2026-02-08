@@ -23,6 +23,7 @@ interface ChunkRow {
   archived: number | null;
   consumes: string | null;
   creates: string | null;
+  wave: number | null;
 }
 
 function safeJsonParse(value: string | null, fallback: string[] = []): string[] {
@@ -71,6 +72,7 @@ function rowToChunk(row: ChunkRow): Chunk {
     archived: row.archived === 1 ? true : undefined,
     consumes: safeJsonParse(row.consumes),
     creates: safeJsonParse(row.creates),
+    wave: row.wave ?? undefined,
   };
 }
 
@@ -149,6 +151,7 @@ export function updateChunk(id: string, data: {
   reviewFeedback?: string;
   dependencies?: string[];
   commitHash?: string;
+  wave?: number;
 }): Chunk | null {
   const database = getDb();
   const existing = getChunk(id);
@@ -161,7 +164,8 @@ export function updateChunk(id: string, data: {
         output = ?, output_summary = ?, error = ?,
         started_at = CASE WHEN ? = 'running' AND started_at IS NULL THEN ? ELSE started_at END,
         completed_at = CASE WHEN ? IN ('completed', 'failed') AND completed_at IS NULL THEN ? ELSE completed_at END,
-        review_status = ?, review_feedback = ?, dependencies = ?, commit_hash = ?
+        review_status = ?, review_feedback = ?, dependencies = ?, commit_hash = ?,
+        wave = ?
     WHERE id = ?
   `);
 
@@ -187,6 +191,7 @@ export function updateChunk(id: string, data: {
     data.reviewFeedback ?? existing.reviewFeedback ?? null,
     JSON.stringify(newDependencies),
     data.commitHash ?? existing.commitHash ?? null,
+    data.wave ?? existing.wave ?? null,
     id
   );
 

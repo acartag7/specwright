@@ -76,6 +76,8 @@ export interface Chunk {
   // Wiring verification (v2-07)
   consumes?: string[];
   creates?: string[];
+  // Parallel execution (v2-08)
+  wave?: number;
 }
 
 // ============================================================================
