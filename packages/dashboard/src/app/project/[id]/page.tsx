@@ -7,6 +7,10 @@ import type { Project, Spec, SpecStatus } from '@specwright/shared';
 import SpecCard from '@/components/SpecCard';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import ConfirmModal from '@/components/ConfirmModal';
+import MetaSpecEditor from '@/components/meta-spec/MetaSpecEditor';
+import MetaSpecOnboarding from '@/components/meta-spec/MetaSpecOnboarding';
+import PhaseCard from '@/components/meta-spec/PhaseCard';
+import { useMetaSpec } from '@/hooks/useMetaSpec';
 
 interface SpecWithCounts extends Spec {
   chunkCount: number;
@@ -30,6 +34,20 @@ export default function ProjectPage() {
   const [isCreatingSpec, setIsCreatingSpec] = useState(false);
   const [deleteConfirmSpec, setDeleteConfirmSpec] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  const {
+    metaSpec,
+    isLoading: isMetaSpecLoading,
+    createMetaSpec,
+    updateMetaSpec,
+    deletePhase,
+    updatePhase,
+    improveSection,
+    generateFromSpecs,
+    createPhase,
+    isSaving: isMetaSpecSaving,
+    isAiLoading,
+  } = useMetaSpec(projectId);
 
   // Fetch project and specs
   useEffect(() => {
@@ -123,6 +141,40 @@ export default function ProjectPage() {
       setIsDeleting(false);
     }
   }, [deleteConfirmSpec]);
+
+  // Meta-spec onboarding handlers
+  const handleCreateMetaSpec = useCallback(async () => {
+    await createMetaSpec({
+      vision: '',
+      architecture: '',
+      constraints: '',
+      nonGoals: '',
+    });
+  }, [createMetaSpec]);
+
+  const handleGenerateMetaSpec = useCallback(async () => {
+    const generated = await generateFromSpecs();
+    if (generated) {
+      await createMetaSpec({
+        vision: generated.vision,
+        architecture: generated.architecture,
+        constraints: generated.constraints,
+        nonGoals: generated.nonGoals,
+      });
+      // Add suggested phases
+      for (const phase of generated.phases) {
+        await createPhase({
+          name: phase.name,
+          description: phase.description,
+          successCriteria: phase.successCriteria,
+        });
+      }
+    }
+  }, [generateFromSpecs, createMetaSpec, createPhase]);
+
+  const handlePhaseStatusChange = useCallback(async (phaseId: string, status: import('@specwright/shared').PhaseStatus) => {
+    await updatePhase(phaseId, { status });
+  }, [updatePhase]);
 
   if (isLoading) {
     return (
@@ -256,6 +308,45 @@ export default function ProjectPage() {
                 </svg>
                 {activeWorktreeCount} worktree{activeWorktreeCount !== 1 ? 's' : ''}
               </span>
+            )}
+          </div>
+        )}
+
+        {/* Meta-Spec Section */}
+        {!isMetaSpecLoading && (
+          <div className="mb-6">
+            {metaSpec ? (
+              <>
+                <MetaSpecEditor
+                  metaSpec={metaSpec}
+                  onUpdate={updateMetaSpec}
+                  onImprove={improveSection}
+                  isSaving={isMetaSpecSaving}
+                  isAiLoading={isAiLoading}
+                />
+                {metaSpec.phases.length > 0 && (
+                  <div className="mt-4 space-y-2">
+                    <h3 className="text-xs text-neutral-500 font-mono uppercase tracking-wider">
+                      Phases
+                    </h3>
+                    {metaSpec.phases.map((phase) => (
+                      <PhaseCard
+                        key={phase.id}
+                        phase={phase}
+                        projectId={projectId}
+                        onStatusChange={handlePhaseStatusChange}
+                        onDelete={deletePhase}
+                      />
+                    ))}
+                  </div>
+                )}
+              </>
+            ) : (
+              <MetaSpecOnboarding
+                onCreate={handleCreateMetaSpec}
+                onGenerate={handleGenerateMetaSpec}
+                isLoading={isAiLoading}
+              />
             )}
           </div>
         )}
