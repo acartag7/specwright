@@ -8,7 +8,7 @@ export { getAllProjects, getProject, createProject, updateProject, deleteProject
 export { getSpec, getSpecsByProject, getSpecByProject, createSpec, updateSpec, deleteSpec } from './specs';
 
 // Chunk operations
-export { getChunksBySpec, getChunk, createChunk, updateChunk, deleteChunk, reorderChunks, insertFixChunk } from './chunks';
+export { getChunksBySpec, getChunk, createChunk, updateChunk, deleteChunk, reorderChunks, insertFixChunk, archiveChunk, unarchiveChunk, getActiveChunksForSpec } from './chunks';
 
 // Tool call operations
 export { getToolCallsByChunk, createToolCall, updateToolCall } from './tool-calls';
@@ -24,3 +24,6 @@ export { getWorkerQueue, getQueueItem, getQueueItemBySpec, addToQueue, removeFro
 
 // Review logs operations
 export { getReviewLogsBySpec, getReviewLogsByChunk, getReviewWarningsForSpec } from './review-logs';
+
+// Spec execution context operations (v2-07)
+export { getContext as getSpecExecutionContext, saveContext as saveSpecExecutionContext, clearContext as clearSpecExecutionContext } from './spec-execution-context';

@@ -46,6 +46,7 @@ export interface ProjectConfig {
   planner: PlannerConfig;
   reviewer: ReviewerConfig;
   maxIterations: number;
+  studioModel?: 'opus' | 'sonnet';
 }
 
 export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {

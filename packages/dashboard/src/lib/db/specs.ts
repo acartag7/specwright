@@ -17,6 +17,9 @@ interface SpecRow {
   worktree_created_at: number | null;
   worktree_last_activity: number | null;
   pr_merged: number | null;
+  // Goal verification (v2-07)
+  goal: string | null;
+  verify_goal: number | null;
   created_at: number;
   updated_at: number;
 }
@@ -38,6 +41,8 @@ function rowToSpec(row: SpecRow): Spec {
     worktreeCreatedAt: row.worktree_created_at ?? undefined,
     worktreeLastActivity: row.worktree_last_activity ?? undefined,
     prMerged: row.pr_merged === 1 ? true : row.pr_merged === 0 ? false : undefined,
+    goal: row.goal ?? undefined,
+    verifyGoal: row.verify_goal === 0 ? false : row.verify_goal === 1 ? true : undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
