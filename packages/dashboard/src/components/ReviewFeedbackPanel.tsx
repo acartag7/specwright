@@ -1,6 +1,7 @@
 'use client';
 
 import type { ReviewStatus } from '@specwright/shared';
+import { MarkdownRenderer } from './markdown';
 
 interface ReviewFeedbackPanelProps {
   status: ReviewStatus;
@@ -86,9 +87,7 @@ export default function ReviewFeedbackPanel({
       </div>
 
       {/* Feedback content */}
-      <p className="text-[11px] text-neutral-300 font-mono whitespace-pre-wrap leading-relaxed">
-        {feedback}
-      </p>
+      <MarkdownRenderer content={feedback} compact className="text-[11px] font-mono" />
 
       {/* Footer */}
       <p className="text-[9px] text-neutral-600 font-mono mt-2">

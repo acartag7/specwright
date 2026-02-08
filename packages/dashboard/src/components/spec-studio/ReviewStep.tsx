@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { MarkdownRenderer } from '../markdown';
 
 export type ChunkDetailLevel = 'minimal' | 'standard' | 'detailed';
 
@@ -76,9 +77,7 @@ export default function ReviewStep({
           />
         ) : (
           <div className="max-h-[400px] overflow-auto px-4 py-3 bg-neutral-900/50">
-            <div className="prose prose-invert prose-sm max-w-none font-mono">
-              <pre className="whitespace-pre-wrap text-neutral-300 text-sm">{spec}</pre>
-            </div>
+            <MarkdownRenderer content={spec} className="text-sm" />
           </div>
         )}
       </div>

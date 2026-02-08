@@ -38,6 +38,9 @@ export async function POST(request: Request, context: RouteContext) {
       createChunk(specId, {
         title: chunk.title,
         description: chunk.description,
+        files: chunk.files ?? [],
+        verifyCommand: chunk.verifyCommand ?? '',
+        doneCriteria: chunk.doneCriteria ?? '',
         order: chunk.order,
       });
     }

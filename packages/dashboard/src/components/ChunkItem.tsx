@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import type { Chunk, ReviewStatus } from '@specwright/shared';
+import { MarkdownRenderer } from './markdown';
 
 interface ChunkItemProps {
   chunk: Chunk;
@@ -256,9 +257,7 @@ export default function ChunkItem({
           {/* Expandable review feedback panel */}
           {showReviewFeedback && chunk.reviewFeedback && chunk.reviewStatus && (
             <div className={`mt-2 p-2 rounded ${reviewConfig[chunk.reviewStatus].bg} border border-neutral-800`}>
-              <p className="text-[10px] text-neutral-400 font-mono whitespace-pre-wrap">
-                {chunk.reviewFeedback}
-              </p>
+              <MarkdownRenderer content={chunk.reviewFeedback} compact className="text-[10px] font-mono" />
               <p className="text-[9px] text-neutral-600 font-mono mt-1">Reviewed with Haiku</p>
             </div>
           )}

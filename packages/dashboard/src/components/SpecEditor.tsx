@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react';
 import type { Spec } from '@specwright/shared';
+import { MarkdownRenderer } from './markdown';
 
 interface SpecEditorProps {
   spec: Spec;
@@ -12,6 +13,7 @@ export default function SpecEditor({ spec, onUpdate }: SpecEditorProps) {
   const [content, setContent] = useState(spec.content);
   const [isSaving, setIsSaving] = useState(false);
   const [isRefining, setIsRefining] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [error, setError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -148,6 +150,12 @@ export default function SpecEditor({ spec, onUpdate }: SpecEditorProps) {
               save
             </button>
             <button
+              onClick={() => setShowPreview(!showPreview)}
+              className="text-[10px] font-mono text-neutral-500 hover:text-neutral-300 px-2 py-0.5 rounded hover:bg-neutral-800 transition-colors"
+            >
+              {showPreview ? 'edit' : 'preview'}
+            </button>
+            <button
               onClick={handleRefine}
               disabled={isRefining || !content.trim()}
               className="text-[10px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/20 px-2 py-0.5 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
@@ -179,13 +187,18 @@ export default function SpecEditor({ spec, onUpdate }: SpecEditorProps) {
           </div>
         )}
 
-        {/* Editor */}
+        {/* Editor / Preview */}
         <div className="flex-1 min-h-0 p-3 overflow-hidden">
-          <textarea
-            ref={textareaRef}
-            value={content}
-            onChange={handleContentChange}
-            placeholder="# Feature Name
+          {showPreview ? (
+            <div className="h-full overflow-y-auto">
+              <MarkdownRenderer content={content} />
+            </div>
+          ) : (
+            <textarea
+              ref={textareaRef}
+              value={content}
+              onChange={handleContentChange}
+              placeholder="# Feature Name
 
 ## Overview
 Describe what this feature does.
@@ -197,9 +210,10 @@ Describe what this feature does.
 ## Acceptance Criteria
 - [ ] Criteria 1
 - [ ] Criteria 2"
-            className="w-full h-full min-h-[200px] bg-transparent text-sm text-neutral-300 font-mono placeholder-neutral-700 focus:outline-none resize-none overflow-y-auto"
-            disabled={isRefining}
-          />
+              className="w-full h-full min-h-[200px] bg-transparent text-sm text-neutral-300 font-mono placeholder-neutral-700 focus:outline-none resize-none overflow-y-auto"
+              disabled={isRefining}
+            />
+          )}
         </div>
 
         {/* Footer info */}

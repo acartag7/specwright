@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type { Chunk, ChunkToolCall, ChunkStatus, ReviewResult, ReviewStatus } from '@specwright/shared';
+import { DiffView } from './markdown';
 
 interface ExecutionPanelProps {
   chunk: Chunk | null;
@@ -183,24 +184,38 @@ export default function ExecutionPanel({
             </div>
           ) : (
             <div className="bg-neutral-900/50 border border-neutral-800/50 rounded divide-y divide-neutral-800/50 max-h-[150px] overflow-auto">
-              {toolCalls.map((tc) => (
-                <div key={tc.id} className="px-2 py-1.5 flex items-center gap-2">
-                  <span className={`font-mono text-[10px] ${statusColors[tc.status]}`}>
-                    {tc.status === 'running' ? '◐' : tc.status === 'completed' ? '✓' : '✕'}
-                  </span>
-                  <span className="text-xs text-neutral-400 font-mono">{tc.tool}</span>
-                  {tc.input && 'file_path' in tc.input && (
-                    <span className="text-[10px] text-neutral-600 font-mono truncate flex-1">
-                      {String(tc.input.file_path).split('/').pop()}
-                    </span>
-                  )}
-                  {tc.completedAt && tc.startedAt && (
-                    <span className="text-[10px] text-neutral-600 font-mono">
-                      {((tc.completedAt - tc.startedAt) / 1000).toFixed(1)}s
-                    </span>
-                  )}
-                </div>
-              ))}
+              {toolCalls.map((tc) => {
+                const isFileEdit = tc.tool === 'write_file' || tc.tool === 'edit_file' || tc.tool === 'str_replace_editor';
+                return (
+                  <div key={tc.id} className="px-2 py-1.5">
+                    <div className="flex items-center gap-2">
+                      <span className={`font-mono text-[10px] ${statusColors[tc.status]}`}>
+                        {tc.status === 'running' ? '◐' : tc.status === 'completed' ? '✓' : '✕'}
+                      </span>
+                      <span className="text-xs text-neutral-400 font-mono">{tc.tool}</span>
+                      {tc.input && 'file_path' in tc.input && (
+                        <span className="text-[10px] text-neutral-600 font-mono truncate flex-1">
+                          {String(tc.input.file_path).split('/').pop()}
+                        </span>
+                      )}
+                      {tc.completedAt && tc.startedAt && (
+                        <span className="text-[10px] text-neutral-600 font-mono">
+                          {((tc.completedAt - tc.startedAt) / 1000).toFixed(1)}s
+                        </span>
+                      )}
+                    </div>
+                    {isFileEdit && tc.status === 'completed' && tc.input && (
+                      <div className="mt-1">
+                        <DiffView
+                          oldText={tc.input && 'old_str' in tc.input ? String(tc.input.old_str) : ''}
+                          newText={tc.input && 'new_str' in tc.input ? String(tc.input.new_str) : tc.input && 'content' in tc.input ? String(tc.input.content) : ''}
+                          filename={tc.input && 'file_path' in tc.input ? String(tc.input.file_path).split('/').pop() : undefined}
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

@@ -46,6 +46,9 @@ export async function POST(request: Request, context: RouteContext) {
     const chunk = createChunk(specId, {
       title: body.title.trim(),
       description: body.description.trim(),
+      files: body.files ?? [],
+      verifyCommand: body.verifyCommand ?? '',
+      doneCriteria: body.doneCriteria ?? '',
       order: body.order,
     });
 
