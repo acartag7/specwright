@@ -51,3 +51,18 @@ export {
   type UseExecutionReturn,
   type UseExecutionProps,
 } from './manager';
+
+// Tool call repository (ORC-118)
+export {
+  getToolCallsByChunk,
+  createToolCall,
+  updateToolCall,
+} from './tool-calls-repository';
+
+// Opencode manager (ORC-120)
+export {
+  OpencodeManager,
+  opencodeManager,
+  type OpencodeStatus,
+  type OpencodeManagerConfig,
+} from './opencode-manager';

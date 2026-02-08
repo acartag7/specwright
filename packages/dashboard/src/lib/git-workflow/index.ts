@@ -34,3 +34,11 @@ export {
   removeWorktree,
   listWorktrees,
 } from './worktrees';
+
+export {
+  GitService,
+  gitService,
+  type GitWorkflowState,
+  type CommitResult,
+  type PRResult,
+} from './service';

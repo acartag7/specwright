@@ -1,5 +1,14 @@
 // Domain: spec
 export {
+  getSpec,
+  getSpecsByProject,
+  getSpecByProject,
+  createSpec,
+  updateSpec,
+  deleteSpec,
+} from './repository';
+
+export {
   SpecExecutionService,
   specExecutionService,
   type SpecExecutionEvents,
