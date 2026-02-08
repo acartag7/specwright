@@ -19,6 +19,8 @@ import { validationService, type ValidationResult } from './validation-service';
 import { reviewService, createReviewService, type ChunkReviewResult } from './review-service';
 import { gitService, type GitWorkflowState } from './git-service';
 import { WiringChecker } from './goal-verifier/wiring-checker';
+import { executeWithRetry, type IterationConfig, type IterationResult } from '../execution/iteration-loop';
+import { loadConfig } from '../config/config-loader';
 
 export interface ChunkPipelineResult {
   status: 'pass' | 'fail' | 'needs_fix' | 'error' | 'cancelled' | 'blocked';
@@ -27,6 +29,7 @@ export interface ChunkPipelineResult {
   commitHash?: string;
   fixChunkId?: string;
   error?: string;
+  iterationResult?: IterationResult;
 }
 
 export interface ChunkPipelineEvents {
@@ -96,12 +99,60 @@ export class ChunkPipeline {
       }
     }
 
-    // Step 1: Execute chunk
+    // Step 1: Execute chunk (with optional iteration loop)
     events?.onExecutionStart?.(chunkId);
 
-    const executionResult = await chunkExecutor.execute(chunkId, {
-      onToolCall: (toolCall) => events?.onToolCall?.(chunkId, toolCall),
-    });
+    const config = await loadConfig(project?.directory);
+    const maxRetries = config.defaults.maxRetries;
+    const workingDirForRetry = gitState?.workingDir || project?.directory;
+
+    let executionResult: ExecutionResult;
+    let iterationResult: IterationResult | undefined;
+
+    if (maxRetries > 0 && workingDirForRetry) {
+      const iterConfig: IterationConfig = {
+        maxIterations: maxRetries + 1,
+        onFailure: 'reset',
+        workingDir: workingDirForRetry,
+      };
+
+      iterationResult = await executeWithRetry(
+        chunkId,
+        async (id, feedback) => {
+          const result = await chunkExecutor.execute(id, {
+            onToolCall: (toolCall) => events?.onToolCall?.(chunkId, toolCall),
+          }, project?.directory);
+
+          return {
+            success: result.status === 'completed',
+            output: result.output,
+            error: result.error,
+            feedback: feedback
+              ? `Previous attempt feedback:\n${feedback}`
+              : undefined,
+          };
+        },
+        iterConfig,
+      );
+
+      const lastAttempt = iterationResult.history[iterationResult.history.length - 1];
+      executionResult = {
+        status: iterationResult.success ? 'completed' : 'failed',
+        output: lastAttempt?.result.output,
+        error: lastAttempt?.result.error,
+      };
+
+      if (iterationResult.iterations > 1) {
+        console.log(
+          `[ChunkPipeline] Iteration loop: ${iterationResult.iterations} attempts, ` +
+          `status=${iterationResult.finalStatus}`,
+        );
+      }
+    } else {
+      executionResult = await chunkExecutor.execute(chunkId, {
+        onToolCall: (toolCall) => events?.onToolCall?.(chunkId, toolCall),
+      }, project?.directory);
+    }
 
     if (executionResult.status === 'cancelled') {
       return { status: 'cancelled', output: executionResult.output };
@@ -113,6 +164,7 @@ export class ChunkPipeline {
         status: 'fail',
         output: executionResult.output,
         error: executionResult.error,
+        iterationResult,
       };
     }
 
