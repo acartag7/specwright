@@ -91,3 +91,41 @@ export type ExecutionStatus =
   | 'failed'
   | 'cancelled'
   | 'timeout';
+
+// Context tracking types (v2-05)
+export interface ContextMetrics {
+  estimated: {
+    total: number;
+    breakdown: {
+      systemPrompt: number;
+      specContent: number;
+      chunkDescription: number;
+      dependencyHistory: number;
+    };
+  };
+  model: {
+    id: string;
+    contextLimit: number;
+    outputLimit: number;
+  };
+  percentage: number;
+  status: 'peak' | 'good' | 'degrading' | 'poor';
+  warnings: ContextWarning[];
+}
+
+export interface ContextWarning {
+  level: 'info' | 'warning' | 'critical';
+  component: 'systemPrompt' | 'specContent' | 'chunkDescription' | 'dependencyHistory';
+  currentTokens: number;
+  percentageOfTotal: number;
+  message: string;
+  suggestion: ContextSuggestion;
+}
+
+export interface ContextSuggestion {
+  action: 'split-chunk' | 'split-spec' | 'archive-chunks' | 'compress-summaries' | 'summary-only';
+  label: string;
+  description: string;
+  estimatedSavings: number;
+  affectedItems?: string[];
+}
