@@ -8,11 +8,13 @@
  * Aborts the current run-all execution
  */
 
-import { getSpec } from '@/lib/db';
+import { getSpec, addToQueue } from '@/lib/db';
 import {
   specExecutionService,
   type SpecExecutionEvents,
 } from '@/lib/services/spec-execution-service';
+import { getOrchestrator } from '@/lib/worker-orchestrator';
+import { detectFileOverlaps } from '@/lib/services/file-conflict-detector';
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -62,6 +64,25 @@ export async function POST(request: Request, context: RouteContext) {
     return new Response(JSON.stringify({ error: 'Run All is already in progress for this spec' }), {
       status: 409,
       headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  // Detect file overlaps with running specs (informational)
+  const overlaps = detectFileOverlaps(specId);
+  if (overlaps.length > 0) {
+    console.log(`[Parallel] Spec ${specId} overlaps with running specs:`, overlaps);
+  }
+
+  // Check orchestrator capacity — queue if full
+  const orchestrator = getOrchestrator();
+  if (!orchestrator.hasCapacity()) {
+    addToQueue(specId, spec.projectId);
+    const queue = orchestrator.getQueue();
+    const position = queue.findIndex(q => q.specId === specId) + 1;
+    return Response.json({
+      status: 'queued',
+      queuePosition: position,
+      overlaps: overlaps.length > 0 ? overlaps : undefined,
     });
   }
 
