@@ -8,6 +8,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Chunk, Spec, Project, ChunkToolCall } from '@specwright/shared';
 
 // Mock all dependencies before importing the module under test
+// Paths must match what chunk/pipeline.ts actually imports (DDD paths)
 vi.mock('../../db', () => ({
   getChunk: vi.fn(),
   updateChunk: vi.fn(),
@@ -20,7 +21,20 @@ vi.mock('../../db/projects', () => ({
   getProject: vi.fn(),
 }));
 
-vi.mock('../../services/chunk-executor', () => ({
+const { mockGetSpecFromSpecs } = vi.hoisted(() => ({
+  mockGetSpecFromSpecs: vi.fn(),
+}));
+
+vi.mock('../../db/specs', () => ({
+  getSpec: mockGetSpecFromSpecs,
+}));
+
+vi.mock('../../db/spec-execution-context', () => ({
+  getContext: vi.fn(() => null),
+  saveContext: vi.fn(),
+}));
+
+vi.mock('../../chunk/executor', () => ({
   chunkExecutor: {
     execute: vi.fn(),
     abort: vi.fn(),
@@ -28,7 +42,7 @@ vi.mock('../../services/chunk-executor', () => ({
   },
 }));
 
-vi.mock('../../services/validation-service', () => ({
+vi.mock('../../chunk/validation-service', () => ({
   validationService: {
     validate: vi.fn(),
   },
@@ -39,7 +53,7 @@ const { mockReviewChunkFn } = vi.hoisted(() => ({
   mockReviewChunkFn: vi.fn(),
 }));
 
-vi.mock('../../services/review-service', () => ({
+vi.mock('../../review/service', () => ({
   reviewService: {
     reviewChunk: mockReviewChunkFn,
   },
@@ -48,21 +62,49 @@ vi.mock('../../services/review-service', () => ({
   })),
 }));
 
-vi.mock('../../services/git-service', () => ({
+vi.mock('../../git-workflow/service', () => ({
   gitService: {
     commitChunk: vi.fn(),
     resetHard: vi.fn(),
   },
 }));
 
+vi.mock('../../services/goal-verifier/wiring-checker', () => ({
+  WiringChecker: vi.fn().mockImplementation(() => ({
+    check: vi.fn(() => ({ passed: true, missing: [], available: [] })),
+  })),
+}));
+
+vi.mock('../../execution/iteration-loop', () => ({
+  executeWithRetry: vi.fn(async (_config: unknown, executeFn: () => Promise<unknown>) => {
+    const result = await executeFn();
+    return { attempts: 1, finalResult: result, allResults: [result] };
+  }),
+}));
+
+vi.mock('../../config/config-loader', () => ({
+  loadConfig: vi.fn(async () => ({
+    parallel: { enabled: false, maxConcurrent: 3 },
+    defaults: { maxRetries: 0 },
+    rules: {},
+  })),
+}));
+
+vi.mock('../../execution/context-tracker', () => ({
+  calculateContextMetrics: vi.fn(() => ({
+    estimatedTokens: 0,
+    quality: 'good',
+  })),
+}));
+
 // Import after mocks are set up
-import { ChunkPipeline, type ChunkPipelineEvents } from '../../services/chunk-pipeline';
+import { ChunkPipeline, type ChunkPipelineEvents } from '../../chunk/pipeline';
 import { getChunk, updateChunk, getSpec } from '../../db';
 import { getProject } from '../../db/projects';
-import { chunkExecutor } from '../../services/chunk-executor';
-import { validationService } from '../../services/validation-service';
-import { reviewService, createReviewService } from '../../services/review-service';
-import { gitService, type GitWorkflowState } from '../../services/git-service';
+import { chunkExecutor } from '../../chunk/executor';
+import { validationService } from '../../chunk/validation-service';
+import { reviewService, createReviewService } from '../../review/service';
+import { gitService, type GitWorkflowState } from '../../git-workflow/service';
 
 describe('ChunkPipeline', () => {
   let pipeline: ChunkPipeline;
@@ -115,6 +157,7 @@ describe('ChunkPipeline', () => {
     // Default mocks
     vi.mocked(getChunk).mockReturnValue(mockChunk);
     vi.mocked(getSpec).mockReturnValue(mockSpec);
+    mockGetSpecFromSpecs.mockReturnValue(mockSpec);
     vi.mocked(getProject).mockReturnValue(mockProject);
   });
 
@@ -154,7 +197,7 @@ describe('ChunkPipeline', () => {
       expect(result.output).toBe('Execution output');
       expect(result.commitHash).toBe('abc123');
 
-      expect(chunkExecutor.execute).toHaveBeenCalledWith('chunk-1', expect.any(Object));
+      expect(chunkExecutor.execute).toHaveBeenCalledWith('chunk-1', expect.any(Object), '/test/project');
       expect(validationService.validate).toHaveBeenCalledWith('chunk-1', '/test/project');
       expect(reviewService.reviewChunk).toHaveBeenCalled();
       expect(gitService.commitChunk).toHaveBeenCalled();
@@ -387,6 +430,7 @@ describe('ChunkPipeline', () => {
 
     it('returns error when spec not found', async () => {
       vi.mocked(getSpec).mockReturnValue(null);
+      mockGetSpecFromSpecs.mockReturnValue(null);
 
       const events: ChunkPipelineEvents = {
         onError: vi.fn(),
