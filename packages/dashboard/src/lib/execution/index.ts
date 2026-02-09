@@ -66,3 +66,30 @@ export {
   type OpencodeStatus,
   type OpencodeManagerConfig,
 } from './opencode-manager';
+
+// Iteration loop (v2-01, ORC-85)
+export {
+  executeWithRetry,
+  type IterationConfig,
+  type IterationAttempt,
+  type IterationResult,
+} from './iteration-loop';
+
+// Wave scheduler (v2-08)
+export {
+  buildWaveSchedule,
+  detectFileOverlap,
+  splitByFileOverlap,
+  type WaveSchedule,
+  type Wave,
+  type SerializedReason,
+} from './wave-scheduler';
+
+// Parallel executor (v2-08)
+export {
+  executeWave,
+  type ChunkResult,
+  type ChunkFailure,
+  type WaveResult,
+  type ParallelExecutionConfig,
+} from './parallel-executor';
