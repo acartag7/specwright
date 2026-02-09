@@ -59,8 +59,47 @@ vi.mock('../../services/review-service', () => ({
   })),
 }));
 
+vi.mock('../../services/goal-verifier', () => ({
+  goalVerifierService: {
+    verifyGoal: vi.fn(async () => ({
+      status: 'pass',
+      goalAlignment: { score: 1, explanation: 'All good' },
+      chunkResults: [],
+    })),
+  },
+}));
+
+vi.mock('../../spec/dependency-resolver', () => ({
+  findRunnableChunks: vi.fn((chunks: unknown[], completed: Set<string>, failed: Set<string>) => {
+    const allChunks = chunks as Array<{ id: string; status: string; dependencies: string[] }>;
+    return allChunks.filter(c =>
+      !completed.has(c.id) && !failed.has(c.id) &&
+      (c.status === 'pending' || c.status === 'failed' || c.status === 'cancelled') &&
+      c.dependencies.every((d: string) => completed.has(d))
+    );
+  }),
+  validateDependencies: vi.fn(() => ({ valid: true })),
+  cancelDependentChunks: vi.fn(),
+}));
+
+vi.mock('../../execution/wave-scheduler', () => ({
+  buildWaveSchedule: vi.fn(() => ({ waves: [], serializedChunks: [] })),
+}));
+
+vi.mock('../../execution/parallel-executor', () => ({
+  executeWave: vi.fn(async () => ({ allPassed: true, results: [], failures: [] })),
+}));
+
+vi.mock('../../config/config-loader', () => ({
+  loadConfig: vi.fn(async () => ({
+    parallel: { enabled: false, maxConcurrent: 3 },
+    defaults: {},
+    rules: {},
+  })),
+}));
+
 // Import after mocks are set up
-import { SpecExecutionService, type SpecExecutionEvents } from '../../services/spec-execution-service';
+import { SpecExecutionService, type SpecExecutionEvents } from '../../spec/execution-service';
 import { getSpec, updateSpec, getChunksBySpec, updateChunk, getChunk } from '../../db';
 import { getProject } from '../../db/projects';
 import { chunkPipeline } from '../../services/chunk-pipeline';
@@ -105,6 +144,9 @@ describe('SpecExecutionService', () => {
     description: 'Test description',
     order: 0,
     status: 'pending',
+    files: [],
+    verifyCommand: '',
+    doneCriteria: '',
     dependencies: [],
     ...overrides,
   });

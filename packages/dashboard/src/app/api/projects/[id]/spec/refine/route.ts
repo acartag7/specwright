@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getProject, getSpecByProject, updateSpec } from '@/lib/db';
-import { ClaudeClient } from '@specwright/mcp/client';
+import { ClaudeClient } from '@/lib/clients/claude-client';
 import type { RefineSpecRequest } from '@specwright/shared';
 
 interface RouteContext {
@@ -56,7 +56,7 @@ export async function POST(request: Request, context: RouteContext) {
     }
 
     // Call Claude to refine
-    const client = new ClaudeClient({ model: 'claude-opus-4-5-20251101' });
+    const client = new ClaudeClient({ model: 'claude-opus-4-6' });
     const result = await client.execute(prompt, {
       workingDirectory: project.directory,
       systemPrompt: REFINE_SYSTEM_PROMPT,

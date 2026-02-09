@@ -79,6 +79,10 @@ export default function ChunksStep({
       id: `custom_${Date.now()}`,
       title: customTitle.trim(),
       description: customDescription.trim(),
+      files: [],
+      verifyCommand: '',
+      doneCriteria: '',
+      dependencies: [],
       selected: true,
       order: chunks.length + 1,
     };

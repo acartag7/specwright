@@ -18,7 +18,7 @@ import {
   waitForChunkCompletion,
   abortChunkExecution,
 } from './execution';
-import { ClaudeClient } from '@specwright/mcp/client';
+import { ClaudeClient } from '@/lib/clients/claude-client';
 import { buildReviewPrompt, parseReviewResult } from './prompts';
 
 type WorkerEventCallback = (event: {

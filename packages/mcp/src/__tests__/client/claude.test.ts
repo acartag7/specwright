@@ -116,14 +116,14 @@ describe("ClaudeClient", () => {
 
       const client = new ClaudeClient();
       await client.execute("Test prompt", {
-        model: "claude-sonnet-4-20250514",
+        model: "claude-sonnet-4-5-20250929",
       });
 
       expect(spawn).toHaveBeenCalledWith(
         "claude",
         expect.arrayContaining([
           "--model",
-          "claude-sonnet-4-20250514",
+          "claude-sonnet-4-5-20250929",
         ]),
         expect.any(Object)
       );

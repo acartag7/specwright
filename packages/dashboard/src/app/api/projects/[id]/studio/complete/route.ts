@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getProject, getSpecByProject, updateSpec, createChunk, updateStudioState } from '@/lib/db';
-import type { CompleteStudioRequest } from '@specwright/shared';
+import { validateChunk } from '@/lib/chunk-validator';
+import type { CompleteStudioRequest, ChunkSuggestion } from '@specwright/shared';
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -50,7 +51,25 @@ export async function POST(request: Request, context: RouteContext) {
 
     // Create chunks from selected suggestions
     // First pass: create a mapping from suggestion IDs to actual chunk IDs
-    const selectedChunks = (body.chunks || []).filter(c => c.selected);
+    const selectedChunks = (body.chunks || []).filter((c: ChunkSuggestion) => c.selected);
+
+    // Validate all chunks before creating
+    const validationResults = selectedChunks.map((chunk: ChunkSuggestion) => ({
+      chunk,
+      validation: validateChunk(chunk),
+    }));
+
+    const invalidChunks = validationResults.filter(r => !r.validation.valid);
+    if (invalidChunks.length > 0) {
+      return NextResponse.json({
+        error: 'Invalid chunks',
+        details: invalidChunks.map(r => ({
+          title: r.chunk.title,
+          errors: r.validation.errors,
+        })),
+      }, { status: 400 });
+    }
+
     const idMapping: Record<string, string> = {};
 
     // Create chunks and build ID mapping
@@ -63,6 +82,9 @@ export async function POST(request: Request, context: RouteContext) {
       const createdChunk = createChunk(spec.id, {
         title: chunk.title,
         description: chunk.description,
+        files: chunk.files || [],
+        verifyCommand: chunk.verifyCommand || '',
+        doneCriteria: chunk.doneCriteria || '',
         order: chunk.order,
         dependencies: mappedDependencies,
       });

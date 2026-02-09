@@ -6,6 +6,9 @@
  */
 
 import type { Chunk, Spec } from '@specwright/shared';
+import { calculateContextMetrics } from './execution/context-tracker';
+import type { PromptComponents } from './execution/context-tracker';
+import type { ContextMetrics, ModelInfo } from './execution/types';
 
 interface ChunkPromptOptions {
   includeSpecContent?: boolean;
@@ -13,10 +16,24 @@ interface ChunkPromptOptions {
   includeFilesModified?: boolean;
 }
 
+export interface PromptBuildResult {
+  prompt: string;
+  metrics: ContextMetrics;
+  components: PromptComponents;
+}
+
 const DEFAULT_OPTIONS: ChunkPromptOptions = {
   includeSpecContent: true,
   maxOutputLength: 2000,
   includeFilesModified: true,
+};
+
+const DEFAULT_MODEL: ModelInfo = {
+  id: 'claude-sonnet-4-5-20250929',
+  name: 'Claude Sonnet 4.5',
+  provider: 'anthropic',
+  capabilities: { toolCall: true, attachment: true, reasoning: true },
+  limits: { context: 200000, output: 100000 },
 };
 
 /**
@@ -215,20 +232,40 @@ Now complete this task.`;
 }
 
 /**
- * High-level function to build the appropriate prompt
+ * High-level function to build the appropriate prompt.
+ *
+ * Overload with ModelInfo returns PromptBuildResult (prompt + context metrics).
+ * Overload without ModelInfo returns plain string for backward compatibility.
  */
 export async function buildPromptForChunk(
   chunk: Chunk,
   spec: Spec,
   getChunk: (id: string) => Chunk | undefined,
-  options: Partial<ChunkPromptOptions> = {}
-): Promise<string> {
-  // If no dependencies, use the simpler first chunk prompt
-  if (chunk.dependencies.length === 0) {
-    return buildFirstChunkPrompt(chunk, spec);
-  }
+  model: ModelInfo,
+  options?: Partial<ChunkPromptOptions>
+): Promise<PromptBuildResult>;
+export async function buildPromptForChunk(
+  chunk: Chunk,
+  spec: Spec,
+  getChunk: (id: string) => Chunk | undefined,
+  options?: Partial<ChunkPromptOptions>
+): Promise<string>;
+export async function buildPromptForChunk(
+  chunk: Chunk,
+  spec: Spec,
+  getChunk: (id: string) => Chunk | undefined,
+  modelOrOptions?: ModelInfo | Partial<ChunkPromptOptions>,
+  maybeOptions?: Partial<ChunkPromptOptions>
+): Promise<string | PromptBuildResult> {
+  // Determine whether caller passed a ModelInfo or options
+  const hasModel = modelOrOptions != null && 'id' in modelOrOptions && 'provider' in modelOrOptions;
+  const model: ModelInfo | undefined = hasModel ? (modelOrOptions as ModelInfo) : undefined;
+  const options: Partial<ChunkPromptOptions> = hasModel
+    ? (maybeOptions ?? {})
+    : ((modelOrOptions as Partial<ChunkPromptOptions> | undefined) ?? {});
+  const opts = { ...DEFAULT_OPTIONS, ...options };
 
-  // Fetch all dependency chunks
+  // Resolve dependency chunks
   const dependencyChunks: Chunk[] = [];
   for (const depId of chunk.dependencies) {
     const dep = getChunk(depId);
@@ -236,6 +273,50 @@ export async function buildPromptForChunk(
       dependencyChunks.push(dep);
     }
   }
+  const completedDeps = dependencyChunks.filter(c => c.status === 'completed');
 
-  return buildChunkPrompt(chunk, spec, dependencyChunks, options);
+  // Build the prompt
+  let prompt: string;
+  if (chunk.dependencies.length === 0) {
+    prompt = buildFirstChunkPrompt(chunk, spec);
+  } else {
+    prompt = buildChunkPrompt(chunk, spec, dependencyChunks, options);
+  }
+
+  // If no model provided, return string for backward compatibility
+  if (!model) {
+    return prompt;
+  }
+
+  // Build spec content component
+  let specContent = '';
+  if (opts.includeSpecContent && spec.content) {
+    const maxSpecLength = 3000;
+    specContent = spec.content.length > maxSpecLength
+      ? spec.content.slice(0, maxSpecLength) + '\n\n... [spec truncated] ...'
+      : spec.content;
+  }
+
+  // Build components for metrics calculation
+  const chunkDescription = `## ${chunk.title}\n\n${chunk.description}`;
+  const dependencyHistory = chunk.dependencies.length === 0
+    ? ''
+    : buildDependencyContext(completedDeps, opts);
+
+  // The system prompt is the static instruction text (everything minus dynamic content)
+  const systemPrompt = prompt
+    .replace(specContent, '')
+    .replace(chunk.description, '')
+    .replace(dependencyHistory, '');
+
+  const components: PromptComponents = {
+    systemPrompt,
+    specContent,
+    chunkDescription,
+    dependencyHistory,
+  };
+
+  const metrics = calculateContextMetrics(components, model);
+
+  return { prompt, metrics, components };
 }
